@@ -19,12 +19,16 @@ public sealed class Tunnel(RecentLog log)
 
     private static readonly string Script = Path.Combine(AppContext.BaseDirectory, "network.ps1");
 
-    private readonly GostProcess _gost = new(Path.Combine(AgentSettings.Folder, "tunnel.json"), log.Add);
+    private readonly RecentLog _log = log;
     private IReadOnlyList<string> _routes = [];
+    private GostProcess? _gost;
 
-    public bool IsUp => _gost.IsRunning;
+    // gost makes the adapter afresh each time it starts.
+    private GostProcess Gost => _gost ??= new(Path.Combine(AgentSettings.Folder, "tunnel.json"), _log.Add, () => _ = PrepareAsync());
 
-    public void Start(AgentSettings settings, int relayPort) => _gost.Start(new
+    public bool IsUp => Gost.IsRunning;
+
+    public void Start(AgentSettings settings, int relayPort) => Gost.Start(new
     {
         Log = new { Level = "warn" },
         Services = new[]
@@ -52,7 +56,7 @@ public sealed class Tunnel(RecentLog log)
                             new
                             {
                                 Name = "gateway",
-                                Addr = $"{settings.Host}:{relayPort}",
+                                Addr = $"{Address(settings.Host)}:{relayPort}",
                                 Connector = new { Type = "relay", Auth = new { Username = Defaults.RelayUser, Password = settings.AccessKey } },
                                 Dialer = new
                                 {
@@ -67,7 +71,38 @@ public sealed class Tunnel(RecentLog log)
         },
     });
 
-    public void Stop() => _gost.Stop();
+    public void Stop() => Gost.Stop();
+
+    /// <summary>
+    /// The gateway as Windows finds it - with this PC's DNS suffixes, the hosts file, LLMNR - since
+    /// gost's own resolver asks the DNS servers for the bare name, which fails for a short name such
+    /// as "gw01". The name itself if Windows cannot find it either.
+    /// </summary>
+    private static string Address(string host)
+    {
+        if (IPAddress.TryParse(host, out _)) return host;
+        try
+        {
+            var addresses = Dns.GetHostAddresses(host);
+            var address = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+            return address is null ? host : address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
+        }
+        catch (SocketException)
+        {
+            return host;
+        }
+    }
+
+    /// <summary>
+    /// NetBIOS off on the new adapter. Windows broadcasts NetBIOS on every adapter that has it, and
+    /// on this one each broadcast would try to go through the tunnel - every second, for nothing.
+    /// </summary>
+    private async Task PrepareAsync()
+    {
+        var last = "";
+        var code = await PowerShell.RunFileAsync(Script, ["Prepare"], new Dictionary<string, string>(), TimeSpan.FromMinutes(1), line => last = line, CancellationToken.None);
+        if (code != 0) _log.Add($"Could not turn NetBIOS off on the {Adapter} adapter: {last}");
+    }
 
     /// <summary>Routes the facility's networks to the adapter and its DNS names to its servers.</summary>
     public Task ApplyAsync(FacilityInfo facility, string gatewayHost, CancellationToken ct)
@@ -92,7 +127,7 @@ public sealed class Tunnel(RecentLog log)
         };
         _routes = routes;
         var last = "";
-        var code = await PowerShell.RunFileAsync(Script, [action], environment, TimeSpan.FromMinutes(1), line => log.Add(last = line), ct);
+        var code = await PowerShell.RunFileAsync(Script, [action], environment, TimeSpan.FromMinutes(1), line => _log.Add(last = line), ct);
         if (code != 0) throw new InvalidOperationException($"Setting up this PC's routes failed: {last}");
     }
 
@@ -114,17 +149,17 @@ public sealed class Tunnel(RecentLog log)
         {
             if (!IPNetwork.TryParse(route, out var network) || network.BaseAddress.AddressFamily != AddressFamily.InterNetwork || network.PrefixLength < 8)
             {
-                log.Add($"Skipped the route {route}: only IPv4 networks of /8 or narrower are routed");
+                _log.Add($"Skipped the route {route}: only IPv4 networks of /8 or narrower are routed");
                 continue;
             }
             // Its own traffic to the gateway must never go into the tunnel it is carrying.
             if (gateway.Any(network.Contains))
             {
-                log.Add($"Skipped the route {route}: the gateway is in it");
+                _log.Add($"Skipped the route {route}: the gateway is in it");
                 continue;
             }
             foreach (var (name, local) in LocalNetworks().Where(l => l.Network.Contains(network.BaseAddress) || network.Contains(l.Network.BaseAddress)))
-                log.Add($"{route} overlaps {local} on {name}. While connected, those addresses are the facility's.");
+                _log.Add($"{route} overlaps {local} on {name}. While connected, those addresses are the facility's.");
             routes.Add(network.ToString());
         }
         return routes;

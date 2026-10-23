@@ -6,9 +6,10 @@ namespace EasyVPN;
 /// <summary>
 /// One gost.exe (shipped next to this exe) running a JSON configuration. It is restarted if it
 /// exits on its own, and a new configuration restarts it - which also drops every connection
-/// it was carrying, the point when the facility behind it changes.
+/// it was carrying, the point when the facility behind it changes. <paramref name="launched"/>
+/// is told each time it starts, the restarts included.
 /// </summary>
-public sealed class GostProcess(string configPath, Action<string> log)
+public sealed class GostProcess(string configPath, Action<string> log, Action? launched = null)
 {
     private static readonly string Exe = Path.Combine(AppContext.BaseDirectory, "gost.exe");
     private static readonly JsonSerializerOptions ConfigJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -96,6 +97,7 @@ public sealed class GostProcess(string configPath, Action<string> log)
         process.BeginErrorReadLine();
         _process = process;
         _started = DateTime.UtcNow;
+        launched?.Invoke();
     }
 
     private void Kill()
