@@ -1,0 +1,47 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+                    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                    xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
+                    mc:Ignorable="po">
+
+    <!-- ....................................................................
+         Colours live in Palette.Dark.xaml and Palette.Light.xaml, which
+         ThemeService swaps to follow Windows. Only what is the same in both
+         themes stays here: a backdrop dims either theme, and a shadow is black
+         on either.
+         .................................................................... -->
+
+    <Color x:Key="OverlayColor">#99000000</Color>
+    <Color x:Key="ShadowColor">#FF000000</Color>
+    <SolidColorBrush x:Key="OverlayBrush" Color="{StaticResource OverlayColor}" po:Freeze="True" />
+
+    <!-- ....................................................................
+         Typography
+         .................................................................... -->
+
+    <!-- Roboto, embedded from Assets/Fonts (Regular, SemiBold and Bold - the only weights the UI
+         uses). Segoe UI stays behind it for any character Roboto has no glyph for. -->
+    <FontFamily x:Key="AppFontFamily">pack://application:,,,/EasyVPN;component/Assets/Fonts/#Roboto, Segoe UI</FontFamily>
+
+    <sys:Double x:Key="FontSizeSmall">11</sys:Double>
+    <sys:Double x:Key="FontSizeNormal">13</sys:Double>
+    <sys:Double x:Key="FontSizeMedium">15</sys:Double>
+    <sys:Double x:Key="FontSizeLarge">20</sys:Double>
+    <sys:Double x:Key="FontSizeTitle">26</sys:Double>
+
+    <!-- ....................................................................
+         Metrics
+         .................................................................... -->
+
+    <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">6</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">10</CornerRadius>
+
+    <Thickness x:Key="PadTight">6,3</Thickness>
+    <Thickness x:Key="PadNormal">10,6</Thickness>
+    <Thickness x:Key="PadLoose">16,10</Thickness>
+
+    <sys:Double x:Key="RowHeight">32</sys:Double>
+
+</ResourceDictionary>

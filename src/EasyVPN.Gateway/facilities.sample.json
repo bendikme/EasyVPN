@@ -1,0 +1,60 @@
+{
+  "facilities": [
+    {
+      "id": "acme-oslo",
+      "name": "Oslo plant",
+      "customer": "ACME",
+      "connector": "cisco",
+      "settings": { "host": "vpn.acme.example", "user": "dynatec-service" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "10.60.0.0/24" ],
+      "dns": { "domains": [ "plant.acme.local" ], "servers": [ "10.60.0.53" ] },
+      "check": "10.60.0.10:102",
+      "notes": "Line 1 S7-1500 at 10.60.0.10. HMI at 10.60.0.20.",
+      "links": [
+        { "name": "HMI", "url": "rdp://10.60.0.20" },
+        { "name": "PLC web server", "url": "https://10.60.0.10" }
+      ]
+    },
+    {
+      "id": "fjord-alesund",
+      "name": "Ålesund packing",
+      "customer": "Fjord Foods",
+      "connector": "manual",
+      "routes": [ "192.168.10.0/24" ],
+      "check": "192.168.10.5:4840",
+      "timeout": 300,
+      "notes": "FortiClient with MFA: sign in on the gateway desktop. OPC UA server at 192.168.10.5."
+    },
+    {
+      "id": "nordic-bergen",
+      "name": "Bergen line 2",
+      "customer": "Nordic Salmon",
+      "connector": "windows",
+      "settings": { "name": "Nordic Salmon", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "172.20.4.0/22" ],
+      "check": "172.20.4.1:443"
+    },
+    {
+      "id": "polar-tromso",
+      "name": "Tromsø",
+      "customer": "Polar Seafood",
+      "connector": "wireguard",
+      "settings": { "config": "C:\\ProgramData\\EasyVPN\\Gateway\\vpn\\polar-tromso.conf" },
+      "routes": [ "10.8.20.0/24" ],
+      "check": "10.8.20.10:3389",
+      "links": [ { "name": "Engineering PC", "url": "rdp://10.8.20.10" } ]
+    },
+    {
+      "id": "coast-kristiansund",
+      "name": "Kristiansund",
+      "customer": "Coast Aqua",
+      "connector": "openvpn",
+      "settings": { "config": "C:\\ProgramData\\EasyVPN\\Gateway\\vpn\\coast.ovpn", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "10.30.1.0/24", "10.30.2.0/24" ],
+      "check": "10.30.1.2:102"
+    }
+  ]
+}

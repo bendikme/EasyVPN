@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- What the gateway, the agent and the app all speak: the API contracts, and the helpers the
+       two services share for running gost and PowerShell. -->
+  <PropertyGroup>
+    <RootNamespace>EasyVPN</RootNamespace>
+  </PropertyGroup>
+
+</Project>

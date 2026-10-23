@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EasyVPN.Shared/EasyVPN.Shared.csproj" />
+    <Project Path="src/EasyVPN.Gateway/EasyVPN.Gateway.csproj" />
+    <Project Path="src/EasyVPN.Agent/EasyVPN.Agent.csproj" />
+    <Project Path="src/EasyVPN/EasyVPN.csproj" />
+  </Folder>
+</Solution>

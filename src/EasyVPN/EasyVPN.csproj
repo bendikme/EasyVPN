@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <!-- For NotifyIcon only. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>EasyVPN</RootNamespace>
+    <AssemblyName>EasyVPN</AssemblyName>
+    <ApplicationIcon>Assets\easyvpn.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFO0003 asks WinForms apps to set DPI awareness in code; this is a WPF app, so the manifest is right. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EasyVPN.Shared\EasyVPN.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- WinForms' implicit usings collide with WPF (Application, Brush, Color, …), so its few types are written out in full. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <!-- Roboto is compiled in, as in DynatecRDM, so the app looks the same everywhere. Its licence ships beside the exe. -->
+  <ItemGroup>
+    <Resource Include="Assets\easyvpn.ico" />
+    <Resource Include="Assets\Fonts\*.ttf" />
+    <None Update="Assets\Fonts\OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+</Project>
