@@ -78,14 +78,17 @@ dotnet tool install --global wix --version 5.0.2
 wix extension add -g WixToolset.Util.wixext/5.0.2 WixToolset.Firewall.wixext/5.0.2
 ```
 
-**Releases.** Pushing a version tag makes `.github\workflows\release.yml` publish a GitHub release
-with `EasyVPN-Gateway-1.2.3-x64.msi`, `EasyVPN-Client-1.2.3-x64.msi` and `SHA256SUMS.txt`, both
-installers from the same commit (or Actions > Release > Run workflow, with a version):
+**Releases.** `release.ps1` only builds; GitHub publishes. Commit and push, then:
 
 ```powershell
-git tag v1.2.3
-git push origin v1.2.3
+.\build\github-release.ps1 -Version 1.2.3
 ```
+
+It checks that the commit is pushed and the version is new, then tags it `v1.2.3` and pushes the
+tag. That makes `.github\workflows\release.yml` build a GitHub release with
+`EasyVPN-Gateway-1.2.3-x64.msi`, `EasyVPN-Client-1.2.3-x64.msi` and `SHA256SUMS.txt`, both
+installers from that commit. The script follows the build and prints the release's address.
+Pushing the tag by hand does the same (or Actions > Release > Run workflow, with a version).
 
 Versions are three or four numbers: MSI compares numbers only, so `1.2.3-beta` could not upgrade
 `1.2.3`. The installers are not code-signed, so SmartScreen asks before running a downloaded one.
