@@ -23,6 +23,13 @@ public sealed class Facility
     /// <summary>The facility's networks, as CIDR. Clients route these, and only these, to the gateway.</summary>
     public List<string> Routes { get; set; } = [];
 
+    /// <summary>
+    /// The VPN gives the gateway the facility's Ethernet (Tosibox in Layer 2 mode, say), and that
+    /// adapter is bridged with the gateway's "EasyVPN L2": workstations then get Layer 2 too,
+    /// instead of routes.
+    /// </summary>
+    public bool Layer2 { get; set; }
+
     public DnsRule? Dns { get; set; }
 
     /// <summary>
@@ -37,7 +44,7 @@ public sealed class Facility
     public string? Notes { get; set; }
     public List<FacilityLink> Links { get; set; } = [];
 
-    public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links);
+    public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links, Layer2);
 }
 
 /// <summary>
@@ -93,7 +100,7 @@ public sealed partial class FacilityCatalog
         var problem = facility switch
         {
             _ when !IdPattern().IsMatch(facility.Id) => "needs an id of letters, digits, '.', '-' and '_'",
-            { Routes.Count: 0 } => "has no routes",
+            { Routes.Count: 0, Layer2: false } => "has no routes",
             _ when facility.Routes.FirstOrDefault(r => !IPNetwork.TryParse(r, out _)) is { } route =>
                 $"has a route that is not a network in CIDR form: {route}",
             { Check: { } check } when !Probe.TrySplit(check, out _, out _) => $"has a check that is not host:port: {check}",

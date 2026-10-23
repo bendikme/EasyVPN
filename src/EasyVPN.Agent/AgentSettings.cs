@@ -33,5 +33,22 @@ public sealed class AgentSettings
 
     public void Save() => DataDirectory.WriteJson(FilePath, this);
 
+    /// <summary>Saves these settings changed by <paramref name="update"/>, and returns them.</summary>
+    public AgentSettings Apply(AgentSettingsUpdate update)
+    {
+        var gateway = string.IsNullOrWhiteSpace(update.Gateway) ? null : update.Gateway.Trim();
+        var sameGateway = string.Equals(gateway, Gateway, StringComparison.OrdinalIgnoreCase);
+        var settings = new AgentSettings
+        {
+            Gateway = gateway,
+            AccessKey = string.IsNullOrWhiteSpace(update.AccessKey) ? AccessKey : update.AccessKey.Trim(),
+            // Another gateway has another certificate.
+            Thumbprint = sameGateway && !update.ForgetCertificate ? Thumbprint : null,
+        };
+        if (settings.Thumbprint is null) File.Delete(CertificateFile);
+        settings.Save();
+        return settings;
+    }
+
     public AgentSettingsView View() => new(Gateway, !string.IsNullOrEmpty(AccessKey), Thumbprint);
 }

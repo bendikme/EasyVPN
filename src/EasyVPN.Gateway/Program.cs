@@ -38,6 +38,7 @@ builder.Services.AddSingleton(services =>
 builder.Services.AddSingleton<FacilityCatalog>();
 builder.Services.AddSingleton<Connectors>();
 builder.Services.AddSingleton<Relay>();
+builder.Services.AddSingleton<Layer2Port>();
 builder.Services.AddSingleton<ConnectionController>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ConnectionController>());
 
@@ -51,7 +52,12 @@ app.Use((context, next) =>
     return Task.CompletedTask;
 });
 
+// Layer 2 links ride on WebSockets. Pings find a workstation that vanished, so a stale link
+// cannot hold the adapter.
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15), KeepAliveTimeout = TimeSpan.FromSeconds(30) });
+
 var api = app.MapGroup("/api");
+api.Map("/layer2", (HttpContext context, Layer2Port port) => port.RunAsync(context, ClientOf(context.Request)));
 api.MapGet("/facilities", (FacilityCatalog catalog) => catalog.All().Select(f => f.ToInfo()));
 api.MapGet("/status", (ConnectionController controller) => controller.Status);
 api.MapPost("/connect/{id}", (string id, HttpRequest request, ConnectionController controller) =>

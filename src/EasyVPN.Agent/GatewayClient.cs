@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Security;
+using System.Net.WebSockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -15,6 +16,7 @@ namespace EasyVPN.Agent;
 public sealed class GatewayClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly SocketsHttpHandler _handler;
     private readonly AgentSettings _settings;
     private readonly Action<string> _pin;
 
@@ -22,12 +24,12 @@ public sealed class GatewayClient : IDisposable
     {
         _settings = settings;
         _pin = pin;
-        var handler = new SocketsHttpHandler
+        _handler = new SocketsHttpHandler
         {
             ConnectTimeout = TimeSpan.FromSeconds(5),
             SslOptions = { RemoteCertificateValidationCallback = Validate },
         };
-        _http = new HttpClient(handler)
+        _http = new HttpClient(_handler)
         {
             BaseAddress = new Uri($"https://{settings.Host}:{settings.ApiPort}/api/"),
             Timeout = TimeSpan.FromSeconds(15),
@@ -53,6 +55,39 @@ public sealed class GatewayClient : IDisposable
     {
         using var response = await _http.PostAsync("disconnect", null, ct);
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// The gateway's Layer 2 port: a WebSocket on the same address, key and pinned certificate as
+    /// the API, carrying Ethernet frames.
+    /// </summary>
+    public async Task<WebSocket> OpenLayer2Async(CancellationToken ct)
+    {
+        var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", $"Bearer {_settings.AccessKey}");
+        socket.Options.SetRequestHeader(Defaults.ClientHeader, Environment.MachineName);
+        socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
+        socket.Options.CollectHttpResponseDetails = true;
+        try
+        {
+            var address = new Uri($"wss://{_settings.Host}:{_settings.ApiPort}/api/layer2");
+            await socket.ConnectAsync(address, new HttpMessageInvoker(_handler, disposeHandler: false), ct);
+            return socket;
+        }
+        catch (WebSocketException) when (socket.HttpStatusCode is HttpStatusCode.Conflict or HttpStatusCode.ServiceUnavailable)
+        {
+            var status = socket.HttpStatusCode;
+            socket.Dispose();
+            throw new InvalidOperationException(status == HttpStatusCode.Conflict
+                ? "The gateway's Layer 2 port is closed: the facility is not connected there."
+                : "The gateway could not open its Layer 2 adapter. Its activity log says why.");
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     /// <summary>What went wrong talking to the gateway, said so someone can act on it.</summary>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+  EasyVPN Gateway - Windows Installer authoring (WiX v5, v4 schema). Build it with build\release.ps1.
+
+  A per-machine package for the machine (or VM) that has the customers' VPN clients installed: the
+  EasyVPN Gateway service in %ProgramFiles%\EasyVPN Gateway, and a firewall rule for its API and
+  relay. The same folder, service and rule as build\install-gateway.ps1.
+
+  The settings, access key, certificate, facilities and any connectors of one's own live in
+  %ProgramData%\EasyVPN\Gateway, which nothing here touches: install, upgrade and uninstall all
+  leave it as it is. The service makes what is missing there when it starts.
+
+  Preprocessor variables (wix build -d Name=Value):
+    Version     three or four numbers; MSI compares numbers only, so 1.2.3-beta could not upgrade
+    PublishDir  artifacts\Gateway as publish.ps1 made it, without a trailing backslash
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- The UpgradeCode is what makes a new version replace the one installed. NEVER CHANGE IT, or
+       the two install side by side and fight over the service. -->
+  <Package Name="EasyVPN Gateway"
+           Manufacturer="DYNATEC"
+           Version="$(var.Version)"
+           UpgradeCode="14695639-543E-4E17-8FFD-6F0B32F00C2D"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500"
+           Language="1033">
+
+    <!-- An update removes the previous version, then installs this one. AllowSameVersionUpgrades
+         lets a rebuilt 1.2.3 replace an installed 1.2.3. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of EasyVPN Gateway is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- The gateway serves every workstation: an update must never restart it. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="EasyVPN Gateway" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="EasyVPN Gateway" AllowAbsent="no" AllowAdvertise="no">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="Service" />
+    </Feature>
+
+    <Component Id="Service" Directory="INSTALLFOLDER">
+      <File Id="GatewayExe" Source="$(var.PublishDir)\EasyVPN.Gateway.exe" KeyPath="yes" />
+      <ServiceInstall Name="EasyVPN.Gateway"
+                      DisplayName="EasyVPN Gateway"
+                      Description="Connects the facility VPNs and relays EasyVPN clients to the one connected."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Vital="yes">
+        <!-- Started again 5 s after it stops unexpectedly. -->
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
+      <!-- Stopping it also takes down the facility's VPN and the relay. -->
+      <ServiceControl Id="Service" Name="EasyVPN.Gateway" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      <!-- The API and the relay, on their default ports (gateway.json can move them). -->
+      <fw:FirewallException Id="GatewayPorts"
+                            Name="EasyVPN Gateway"
+                            Description="EasyVPN clients: the gateway's API and relay."
+                            Protocol="tcp"
+                            Port="8420,8421"
+                            Scope="any"
+                            Profile="all" />
+    </Component>
+
+    <Icon Id="easyvpn.ico" SourceFile="$(sys.SOURCEFILEDIR)..\src\EasyVPN\Assets\easyvpn.ico" />
+    <Property Id="ARPPRODUCTICON" Value="easyvpn.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/bendikme/EasyVPN" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+  </Package>
+
+  <Fragment>
+    <!-- Everything else publish.ps1 put in the folder (gost, the connectors, the sample facilities,
+         the licences), harvested at build time so a new file is packaged without listing it here. -->
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**">
+        <Exclude Files="$(var.PublishDir)\EasyVPN.Gateway.exe" />
+        <Exclude Files="$(var.PublishDir)\install-gateway.ps1" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

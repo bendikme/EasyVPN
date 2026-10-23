@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+  EasyVPN for a workstation - Windows Installer authoring (WiX v5, v4 schema). Build it with
+  build\release.ps1.
+
+  A per-machine package: the EasyVPN Agent service (SYSTEM, which the adapter, routes and DNS rules
+  need) and the EasyVPN app, in %ProgramFiles%\EasyVPN, with a Start menu shortcut. The same folder,
+  service and shortcut as build\install-client.ps1.
+
+  The agent's settings - the gateway, its access key and pinned certificate - live in
+  %ProgramData%\EasyVPN\Client, which nothing here removes: an update or an uninstall leaves them
+  as they are. Only GATEWAY below writes there, through the agent.
+
+  Preprocessor variables (wix build -d Name=Value):
+    Version     three or four numbers; MSI compares numbers only, so 1.2.3-beta could not upgrade
+    PublishDir  artifacts\Client as publish.ps1 made it, without a trailing backslash
+
+  Properties:
+    GATEWAY     the gateway to use, as chosen in the app's Settings (host, or host:port)
+    ACCESSKEY   its access key; left out, the one already set is kept
+
+        msiexec /i EasyVPN-Client-1.2.3-x64.msi /qn GATEWAY=gw01 ACCESSKEY=<key from the gateway>
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- The UpgradeCode is what makes a new version replace the one installed. NEVER CHANGE IT, or
+       the two install side by side and fight over the service. -->
+  <Package Name="EasyVPN"
+           Manufacturer="DYNATEC"
+           Version="$(var.Version)"
+           UpgradeCode="8AF195FC-F5BF-42F8-A7D7-F2823C70C700"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500"
+           Language="1033">
+
+    <!-- An update removes the previous version, then installs this one. AllowSameVersionUpgrades
+         lets a rebuilt 1.2.3 replace an installed 1.2.3. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of EasyVPN is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- An engineering PC, often mid-commissioning: an update must never restart it. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="EasyVPN" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="EasyVPN" AllowAbsent="no" AllowAdvertise="no">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="App" />
+      <ComponentRef Id="Agent" />
+    </Feature>
+
+    <Component Id="App" Directory="INSTALLFOLDER">
+      <File Id="AppExe" Source="$(var.PublishDir)\EasyVPN.exe" KeyPath="yes">
+        <Shortcut Id="AppShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="EasyVPN"
+                  Description="Quick connections to remote facilities"
+                  WorkingDirectory="INSTALLFOLDER" />
+      </File>
+    </Component>
+
+    <Component Id="Agent" Directory="INSTALLFOLDER">
+      <File Id="AgentExe" Source="$(var.PublishDir)\EasyVPN.Agent.exe" KeyPath="yes" />
+      <ServiceInstall Name="EasyVPN.Agent"
+                      DisplayName="EasyVPN Agent"
+                      Description="Keeps the EasyVPN adapter, and routes the connected facility through it."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Vital="yes">
+        <!-- Started again 5 s after it stops unexpectedly. -->
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
+      <!-- Stopping it also takes the EasyVPN adapter and its routes down. -->
+      <ServiceControl Id="Agent" Name="EasyVPN.Agent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- The app lives in the notification area, where closing its window only hides it, so it is
+         ended instead, for every user. It happens first thing in the install's script - before
+         this or the previous version removes any file - so no file is in use and no restart is
+         needed. (By default WiX would do it just before InstallFiles, after RemoveFiles.) -->
+    <util:CloseApplication Id="CloseApp" Target="EasyVPN.exe" TerminateProcess="0" RebootPrompt="no" />
+
+    <!-- GATEWAY and ACCESSKEY, handed to the agent before its service starts. The key stays out of
+         the installer's log: Hidden for the property, HideTarget for the command line. -->
+    <Property Id="GATEWAY" Secure="yes" />
+    <Property Id="ACCESSKEY" Secure="yes" Hidden="yes" />
+    <CustomAction Id="SetGateway"
+                  FileRef="AgentExe"
+                  ExeCommand="gateway &quot;[GATEWAY]&quot; &quot;[ACCESSKEY]&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  HideTarget="yes"
+                  Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="override Wix4CloseApplications_X64" After="InstallInitialize" />
+      <Custom Action="SetGateway" Before="StartServices" Condition="GATEWAY AND NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <!-- Start the app when someone installed it by double-clicking. This runs in the UI sequence,
+         as that person and not elevated; a silent install (/qn, /qb) has no UI sequence, so
+         never starts it. Only one copy runs per user, so starting it again is harmless. -->
+    <CustomAction Id="LaunchApp"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]EasyVPN.exe&quot;"
+                  Return="asyncNoWait" />
+    <InstallUISequence>
+      <Custom Action="LaunchApp" After="ExecuteAction" Condition="NOT Installed" />
+    </InstallUISequence>
+
+    <Icon Id="easyvpn.ico" SourceFile="$(sys.SOURCEFILEDIR)..\src\EasyVPN\Assets\easyvpn.ico" />
+    <Property Id="ARPPRODUCTICON" Value="easyvpn.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/bendikme/EasyVPN" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+  </Package>
+
+  <Fragment>
+    <!-- Everything else publish.ps1 put in the folder (gost, Wintun, network.ps1, the licences),
+         harvested at build time so a new file is packaged without listing it here. -->
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**">
+        <Exclude Files="$(var.PublishDir)\EasyVPN.exe" />
+        <Exclude Files="$(var.PublishDir)\EasyVPN.Agent.exe" />
+        <Exclude Files="$(var.PublishDir)\install-client.ps1" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

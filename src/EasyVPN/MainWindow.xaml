@@ -501,22 +501,26 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="0" Style="{StaticResource FactLabelStyle}" Text="Networks" />
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Routes}" />
+                                <TextBlock Grid.Row="0" Style="{StaticResource FactLabelStyle}" Text="Link" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Link}" />
 
-                                <TextBlock Grid.Row="1" Style="{StaticResource FactLabelStyle}" Text="DNS" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Dns}" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="1" Style="{StaticResource FactLabelStyle}" Text="Networks" Visibility="{Binding Selected.Routes, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Routes}" Visibility="{Binding Selected.Routes, Converter={StaticResource Visible}}" />
 
-                                <TextBlock Grid.Row="2" Style="{StaticResource FactLabelStyle}" Text="Checked at" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Check}" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="2" Style="{StaticResource FactLabelStyle}" Text="DNS" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Dns}" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
 
-                                <TextBlock Grid.Row="3" Style="{StaticResource FactLabelStyle}" Text="VPN client" />
-                                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Info.Connector}" />
+                                <TextBlock Grid.Row="3" Style="{StaticResource FactLabelStyle}" Text="Checked at" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Check}" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
 
-                                <TextBlock Grid.Row="4" Style="{StaticResource FactLabelStyle}" Text="Notes" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Notes}" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="4" Style="{StaticResource FactLabelStyle}" Text="VPN client" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Info.Connector}" />
+
+                                <TextBlock Grid.Row="5" Style="{StaticResource FactLabelStyle}" Text="Notes" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
+                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Notes}" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
                             </Grid>
                         </Border>
 

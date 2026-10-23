@@ -4,15 +4,19 @@
 
         .\install-client.ps1                                   install or update
         .\install-client.ps1 -Gateway gw01 -AccessKey <key>    and choose the gateway too
+        .\install-client.ps1 -Layer2                           and add the "EasyVPN L2" adapter
         .\install-client.ps1 -Uninstall                        remove it again
 
-    The gateway can also be chosen later, in the app's Settings.
+    The gateway can also be chosen later, in the app's Settings. -Layer2 is for Layer 2 facilities
+    (a Tosibox Lock in Layer 2 mode, say); it needs OpenVPN 2.6 or later installed first, for its
+    TAP-Windows6 driver.
 #>
 #Requires -RunAsAdministrator
 param(
     [switch]$Uninstall,
     [string]$Gateway,
     [string]$AccessKey,
+    [switch]$Layer2,
     [string]$Destination = "$env:ProgramFiles\EasyVPN"
 )
 $ErrorActionPreference = 'Stop'
@@ -43,6 +47,16 @@ if (-not (Get-Service $service -ErrorAction SilentlyContinue)) {
     sc.exe failure $service reset= 86400 actions= restart/5000/restart/5000/restart/60000 | Out-Null
 }
 Start-Service $service
+
+if ($Layer2 -and -not (Get-NetAdapter -Name 'EasyVPN L2' -ErrorAction SilentlyContinue)) {
+    $tapctl = "$env:ProgramFiles\OpenVPN\bin\tapctl.exe"
+    if (-not (Test-Path $tapctl)) { throw 'Layer 2 needs the TAP-Windows6 driver: install OpenVPN 2.6 or later with its TAP driver, then run this again.' }
+    & $tapctl create --name 'EasyVPN L2' --hwid 'root\tap0901' | Out-Null
+    if ($LASTEXITCODE) { throw 'tapctl could not create the "EasyVPN L2" adapter.' }
+    # A default gateway from a facility's DHCP must never win over this PC's own.
+    Set-NetIPInterface -InterfaceAlias 'EasyVPN L2' -AddressFamily IPv4 -InterfaceMetric 500
+    Write-Output 'Added the "EasyVPN L2" adapter for Layer 2 facilities.'
+}
 
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 $link.TargetPath = Join-Path $Destination 'EasyVPN.exe'

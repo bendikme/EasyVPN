@@ -11,7 +11,11 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
     public string Name => Info.Name;
     public string Customer => string.IsNullOrWhiteSpace(Info.Customer) ? "Other" : Info.Customer;
     public string Routes => string.Join(", ", Info.Routes);
-    public string Summary => $"{Info.Connector} · {Routes}";
+    public string Summary => $"{Info.Connector} · {(Info.Layer2 ? "Layer 2" : Routes)}";
+
+    public string Link => Info.Layer2
+        ? $"Layer 2: the facility's LAN, on this PC's \"{Defaults.Layer2Adapter}\" adapter"
+        : "Routed: TCP and UDP to the networks below";
     public string? Dns => Info.Dns is { Domains.Count: > 0 } dns ? $"{string.Join(", ", dns.Domains)} via {string.Join(", ", dns.Servers)}" : null;
     public string? Check => Info.Check;
     public string? Notes => Info.Notes;

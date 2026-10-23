@@ -4,6 +4,16 @@ using EasyVPN.Agent;
 
 // The agent runs as a Windows service (SYSTEM, which the adapter, routes and DNS rules need) and
 // is driven by the EasyVPN app over a local API. Started from a console it runs there instead.
+//
+// EasyVPN.Agent.exe gateway <host> <access key>   chooses the gateway, as Settings in the app do;
+//                                                 the installer's GATEWAY and ACCESSKEY, before
+//                                                 the service starts. An empty key keeps the one set.
+if (args is ["gateway", var gateway, var accessKey])
+{
+    AgentSettings.Load().Apply(new AgentSettingsUpdate(gateway, accessKey, ForgetCertificate: false));
+    return 0;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService(o => o.ServiceName = "EasyVPN.Agent");
 builder.WebHost.UseUrls(Defaults.AgentUrl);
@@ -17,6 +27,7 @@ builder.Services.AddSingleton(services =>
     return new RecentLog(line => logger.LogInformation("{Line}", line));
 });
 builder.Services.AddSingleton<Tunnel>();
+builder.Services.AddSingleton<Layer2Link>();
 builder.Services.AddSingleton<Session>();
 builder.Services.AddHostedService(services => services.GetRequiredService<Session>());
 
@@ -48,6 +59,7 @@ api.MapPost("/disconnect", (Session session, CancellationToken ct) => Gateway(se
 }));
 
 app.Run();
+return 0;
 
 // A call that goes on to the gateway: when the gateway is the problem, say what it is.
 static async Task<IResult> Gateway(Session session, Func<Task<IResult>> call)

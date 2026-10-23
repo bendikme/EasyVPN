@@ -15,7 +15,11 @@ public enum ConnectionState
     Failed,
 }
 
-/// <summary>A facility as clients see it: everything except how the gateway connects to it.</summary>
+/// <summary>
+/// A facility as clients see it: everything except how the gateway connects to it. A routed
+/// facility's <see cref="Routes"/> go through the tunnel; a <see cref="Layer2"/> facility's
+/// Ethernet reaches the workstation's "EasyVPN L2" adapter instead.
+/// </summary>
 public sealed record FacilityInfo(
     string Id,
     string Name,
@@ -25,7 +29,8 @@ public sealed record FacilityInfo(
     DnsRule? Dns,
     string? Check,
     string? Notes,
-    IReadOnlyList<FacilityLink> Links);
+    IReadOnlyList<FacilityLink> Links,
+    bool Layer2 = false);
 
 /// <summary>Names under <see cref="Domains"/> resolve through <see cref="Servers"/> while the facility is connected.</summary>
 public sealed record DnsRule(IReadOnlyList<string> Domains, IReadOnlyList<string> Servers);
@@ -67,6 +72,12 @@ public static class Defaults
     public const string CertificateName = "easyvpn-gateway";
 
     public const string RelayUser = "easyvpn";
+
+    /// <summary>The TAP adapter that carries a Layer 2 facility, on the workstation and on the gateway.</summary>
+    public const string Layer2Adapter = "EasyVPN L2";
+
+    /// <summary>A gateway closes a Layer 2 link with this status when another workstation takes it over.</summary>
+    public const System.Net.WebSockets.WebSocketCloseStatus Layer2TakenOver = System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation;
 
     /// <summary>The machine a gateway request comes from, so everyone can see who switched the gateway.</summary>
     public const string ClientHeader = "X-EasyVPN-Client";

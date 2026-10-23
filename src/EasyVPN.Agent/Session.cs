@@ -4,14 +4,15 @@ namespace EasyVPN.Agent;
 /// This workstation's connection.
 ///
 /// The gateway carries one facility at a time, for every client. The session asks it for one,
-/// follows what it reports, and routes the facility's networks into the tunnel once the gateway
-/// has connected it. Connected here means more than the gateway saying so: a connection from this
-/// PC reached the facility, through the adapter, the relay and the VPN.
+/// follows what it reports, and once the gateway has connected it, carries it to this PC: a routed
+/// facility's networks into the tunnel, a Layer 2 facility's Ethernet onto the "EasyVPN L2"
+/// adapter. Connected here means more than the gateway saying so: this PC reached the facility.
 ///
 /// While connected, the routes stay until the user disconnects - even when the gateway or the
 /// facility stops answering - so the facility's traffic stops rather than going some other way.
+/// A Layer 2 link pulls its adapter's cable out instead.
 /// </summary>
-public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
+public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : BackgroundService
 {
     private static readonly TimeSpan BusyPoll = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan IdlePoll = TimeSpan.FromSeconds(10);
@@ -25,8 +26,8 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
     private AgentStatus _status = new(ConnectionState.Disconnected, null, null, false, false, false, []);
     private IReadOnlyList<LogLine> _gatewayLog = [];
 
-    // The facility routed into the tunnel right now. Only the poll loop touches it.
-    private FacilityInfo? _routed;
+    // The facility carried to this PC right now, routed or linked. Only the poll loop touches it.
+    private FacilityInfo? _carried;
 
     /// <summary>How the last connection ended: shown until the next one starts.</summary>
     private sealed record Outcome(ConnectionState State, string? FacilityId, string? Message)
@@ -87,7 +88,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
         }
         finally
         {
-            // The routes go even when the gateway cannot be told.
+            // The facility goes from this PC even when the gateway cannot be told.
             _wake.Release();
         }
     }
@@ -96,17 +97,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
     {
         lock (_sync)
         {
-            var gateway = string.IsNullOrWhiteSpace(update.Gateway) ? null : update.Gateway.Trim();
-            var sameGateway = string.Equals(gateway, _settings.Gateway, StringComparison.OrdinalIgnoreCase);
-            _settings = new AgentSettings
-            {
-                Gateway = gateway,
-                AccessKey = string.IsNullOrWhiteSpace(update.AccessKey) ? _settings.AccessKey : update.AccessKey.Trim(),
-                // Another gateway has another certificate.
-                Thumbprint = sameGateway && !update.ForgetCertificate ? _settings.Thumbprint : null,
-            };
-            if (_settings.Thumbprint is null) File.Delete(AgentSettings.CertificateFile);
-            _settings.Save();
+            _settings = _settings.Apply(update);
             _gateway?.Dispose();
             _gateway = null;
             _wanted = null;
@@ -179,7 +170,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
     public override async Task StopAsync(CancellationToken ct)
     {
         await base.StopAsync(ct);
-        await UnrouteAsync();
+        await ReleaseAsync();
         tunnel.Stop();
     }
 
@@ -192,7 +183,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
 
         if (!settings.IsConfigured)
         {
-            await UnrouteAsync();
+            await ReleaseAsync();
             tunnel.Stop();
             Publish(ConnectionState.Disconnected, null, "Choose a gateway in Settings.", configured: false, online: false);
             return;
@@ -209,7 +200,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
             if (wanted is null)
                 Publish(outcome.State, outcome.FacilityId, problem, online: false);
             else
-                Publish(_routed is null ? ConnectionState.Connecting : ConnectionState.Interrupted, wanted, problem, online: false);
+                Publish(_carried is null ? ConnectionState.Connecting : ConnectionState.Interrupted, wanted, problem, online: false);
             return;
         }
 
@@ -218,15 +209,15 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
 
         if (wanted is null)
         {
-            await UnrouteAsync();
+            await ReleaseAsync();
             var busy = gateway.State is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted;
             Publish(outcome.State, outcome.FacilityId, outcome.Message ?? (busy ? $"The gateway is in use by {gateway.Client}" : null));
             return;
         }
 
-        // Switched to another facility: the previous one's routes go now, not once the new one is up.
-        if (_routed is not null && !string.Equals(_routed.Id, wanted, StringComparison.OrdinalIgnoreCase))
-            await UnrouteAsync();
+        // Switched to another facility: the previous one goes now, not once the new one is up.
+        if (_carried is not null && !string.Equals(_carried.Id, wanted, StringComparison.OrdinalIgnoreCase))
+            await ReleaseAsync();
 
         if (!string.Equals(gateway.FacilityId, wanted, StringComparison.OrdinalIgnoreCase))
         {
@@ -242,11 +233,14 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
             case ConnectionState.Interrupted:
                 Publish(gateway.State, wanted, gateway.Message);
                 break;
-            case ConnectionState.Connected when _routed is null:
-                await RouteAsync(settings, wanted, gateway.RelayPort, ct);
+            case ConnectionState.Connected when _carried is null:
+                await CarryAsync(settings, wanted, gateway.RelayPort, ct);
+                break;
+            case ConnectionState.Connected when _carried.Layer2:
+                await FollowLinkAsync(_carried);
                 break;
             case ConnectionState.Connected:
-                Publish(ConnectionState.Connected, wanted, $"Connected to {_routed.Name}");
+                Publish(ConnectionState.Connected, wanted, $"Connected to {_carried.Name}");
                 break;
             case ConnectionState.Failed:
                 await EndAsync(ConnectionState.Failed, wanted, gateway.Message);
@@ -257,7 +251,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
         }
     }
 
-    private async Task RouteAsync(AgentSettings settings, string id, int relayPort, CancellationToken ct)
+    private async Task CarryAsync(AgentSettings settings, string id, int relayPort, CancellationToken ct)
     {
         var facility = (await Gateway().FacilitiesAsync(ct)).FirstOrDefault(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
         if (facility is null)
@@ -266,8 +260,15 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
             return;
         }
 
+        _carried = facility;
+        if (facility.Layer2)
+        {
+            layer2.Start(Gateway());
+            Publish(ConnectionState.Connecting, id, "Linking at Layer 2");
+            return;
+        }
+
         Publish(ConnectionState.Connecting, id, $"Routing {facility.Name} through the tunnel");
-        _routed = facility;
         try
         {
             await tunnel.ApplyAsync(facility, settings.Host, ct);
@@ -289,6 +290,38 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
         Publish(ConnectionState.Connected, id, $"Connected to {facility.Name}");
     }
 
+    /// <summary>
+    /// A Layer 2 facility is connected here while its link is up. A link the network dropped is made
+    /// again; one that could not start, or that another workstation took over, ends the connection.
+    /// </summary>
+    private async Task FollowLinkAsync(FacilityInfo facility)
+    {
+        if (layer2.IsUp)
+        {
+            var address = Layer2Link.Address();
+            Publish(ConnectionState.Connected, facility.Id, address is null
+                ? $"Connected to {facility.Name} at Layer 2. The \"{Defaults.Layer2Adapter}\" adapter has no address on its LAN yet."
+                : $"Connected to {facility.Name} at Layer 2. The \"{Defaults.Layer2Adapter}\" adapter is {address} on its LAN.");
+        }
+        else if (layer2.IsRunning)
+        {
+            Publish(ConnectionState.Connecting, facility.Id, "Linking at Layer 2");
+        }
+        else if (layer2.TakenOver is { } takenOver)
+        {
+            await EndAsync(ConnectionState.Disconnected, facility.Id, takenOver);
+        }
+        else if (layer2.Failed is { } failed)
+        {
+            await EndAsync(ConnectionState.Failed, facility.Id, failed);
+        }
+        else
+        {
+            layer2.Start(Gateway());
+            Publish(ConnectionState.Connecting, facility.Id, "Linking at Layer 2 again");
+        }
+    }
+
     /// <summary>Is the facility reachable from this PC? The relay first, then the facility through it.</summary>
     private static async Task<string?> VerifyAsync(AgentSettings settings, FacilityInfo facility, int relayPort, CancellationToken ct)
     {
@@ -302,7 +335,7 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
 
     private async Task EndAsync(ConnectionState state, string facilityId, string? message)
     {
-        await UnrouteAsync();
+        await ReleaseAsync();
         lock (_sync)
         {
             if (_wanted == facilityId) _wanted = null;
@@ -312,11 +345,13 @@ public sealed class Session(Tunnel tunnel, RecentLog log) : BackgroundService
         Publish(state, facilityId, message);
     }
 
-    private async Task UnrouteAsync()
+    /// <summary>Takes the carried facility off this PC: its routes and DNS rules, or its Layer 2 link.</summary>
+    private async Task ReleaseAsync()
     {
-        if (_routed is null) return;
-        _routed = null;
-        await tunnel.ClearAsync();
+        if (_carried is not { } facility) return;
+        _carried = null;
+        if (facility.Layer2) await layer2.StopAsync();
+        else await tunnel.ClearAsync();
     }
 
     private void Publish(ConnectionState state, string? facilityId, string? message, bool configured = true, bool online = true)

@@ -27,6 +27,16 @@
       "notes": "FortiClient with MFA: sign in on the gateway desktop. OPC UA server at 192.168.10.5."
     },
     {
+      "id": "aqua-hitra",
+      "name": "Hitra hatchery",
+      "customer": "Aqua Nord",
+      "connector": "manual",
+      "layer2": true,
+      "check": "192.168.20.10:102",
+      "timeout": 180,
+      "notes": "Tosibox Lock in Layer 2 mode: connect it in TOSIBOX Key on the gateway desktop. On this PC the plant's LAN is the EasyVPN L2 adapter: choose it in TIA Portal to find devices."
+    },
+    {
       "id": "nordic-bergen",
       "name": "Bergen line 2",
       "customer": "Nordic Salmon",

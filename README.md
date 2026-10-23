@@ -40,6 +40,9 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   routes until you disconnect. Connecting another facility is refused while the previous one still
   answers, because two customers often use the same addresses (`192.168.0.10` at both) and a VPN
   left up underneath would quietly take the other one's traffic.
+- **Layer 2 when the VPN has it.** A facility whose VPN gives the gateway its Ethernet (a Tosibox
+  Lock in Layer 2 mode) reaches the workstation as Ethernet too, on a second adapter: see
+  [Layer 2 facilities](#layer-2-facilities).
 
 This is the design worked out in the "VPN client router" discussion: one shared Windows gateway VM,
 one permanent adapter, one active customer, and a controller. Its recommended building blocks are
@@ -55,42 +58,75 @@ our own is involved, and the vendor clients run untouched, as they were designed
 | `src\EasyVPN.Agent` | The workstation service: tunnel, routes and DNS (`network.ps1`), session |
 | `src\EasyVPN` | The app: WPF, using DynatecRDM's design system (`Themes\`), light and dark |
 | `src\EasyVPN.Shared` | API contracts, and the gost and PowerShell helpers both services use |
-| `build` | `publish.ps1` and the two install scripts |
+| `build` | `publish.ps1`, `release.ps1` and the two install scripts |
+| `installer` | The two MSIs, gateway and workstation (WiX 5) |
 
 ## Building
 
 ```powershell
-dotnet build EasyVPN.slnx        # development
-.\build\publish.ps1              # release: artifacts\Gateway and artifacts\Client
+dotnet build EasyVPN.slnx              # development
+.\build\publish.ps1                    # artifacts\Gateway and artifacts\Client, with the install scripts
+.\build\release.ps1 -Version 1.2.3     # the two installers, as a GitHub release has them
 ```
 
-Releases are self-contained (no .NET needed on the machines). `publish.ps1` downloads gost 3.3.1
-and Wintun 0.14.1 and checks them against pinned SHA-256 hashes.
+Everything is self-contained (no .NET needed on the machines). `publish.ps1` downloads gost 3.3.1
+and Wintun 0.14.1 and checks them against pinned SHA-256 hashes. `release.ps1` packages its two
+folders as MSIs (`installer\`) with WiX 5, which needs, once:
+
+```powershell
+dotnet tool install --global wix --version 5.0.2
+wix extension add -g WixToolset.Util.wixext/5.0.2 WixToolset.Firewall.wixext/5.0.2
+```
+
+**Releases.** Pushing a version tag makes `.github\workflows\release.yml` publish a GitHub release
+with `EasyVPN-Gateway-1.2.3-x64.msi`, `EasyVPN-Client-1.2.3-x64.msi` and `SHA256SUMS.txt`, both
+installers from the same commit (or Actions > Release > Run workflow, with a version):
+
+```powershell
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Versions are three or four numbers: MSI compares numbers only, so `1.2.3-beta` could not upgrade
+`1.2.3`. The installers are not code-signed, so SmartScreen asks before running a downloaded one.
 
 ## Setting up
 
+Each installer installs, or updates whatever version is there, and asks for administrator rights.
+`msiexec /i <installer> /qn` installs silently. Uninstalling (Apps & Features) leaves the settings,
+keys and facilities in `%ProgramData%\EasyVPN`.
+
 **The gateway.** A Windows 10/11 or Server machine, often a VM, with the customers' VPN clients
-installed. Copy `artifacts\Gateway` to it and, as administrator:
+installed. Run `EasyVPN-Gateway-<version>-x64.msi` on it. It installs the `EasyVPN Gateway` service
+in `%ProgramFiles%\EasyVPN Gateway` and opens TCP 8420 (API) and 8421 (relay) in the firewall. Then,
+in an administrator PowerShell, get the address, access key and certificate fingerprint for the
+workstations:
 
 ```powershell
-.\install-gateway.ps1
+& "$env:ProgramFiles\EasyVPN Gateway\EasyVPN.Gateway.exe" info
 ```
 
-It installs the `EasyVPN Gateway` service, opens TCP 8420 (API) and 8421 (relay) in the firewall, and
-prints the address, access key and certificate fingerprint for the workstations. Facilities go in
-`%ProgramData%\EasyVPN\Gateway\facilities.json`, which is read again whenever it changes. For VPN
-clients that need someone to sign in (MFA, SAML), set the gateway to log on to a desktop that can be
-reached with Remote Desktop: the app's *Open gateway desktop* button goes there.
+Facilities go in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which is read again whenever it
+changes. For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
+desktop that can be reached with Remote Desktop: the app's *Open gateway desktop* button goes there.
 
-**Each workstation.** Copy `artifacts\Client` to it and, as administrator:
+**Each workstation.** Run `EasyVPN-Client-<version>-x64.msi`. It installs the `EasyVPN Agent`
+service and the app in `%ProgramFiles%\EasyVPN`, with a Start menu shortcut, and starts the app:
+choose the gateway in its Settings. To deploy it with the gateway already chosen:
 
 ```powershell
-.\install-client.ps1 -Gateway gw01 -AccessKey <key from the gateway>
+msiexec /i EasyVPN-Client-1.2.3-x64.msi /qn GATEWAY=gw01 ACCESSKEY=<key from the gateway>
 ```
 
-It installs the `EasyVPN Agent` service and the app, with a Start menu shortcut. The gateway can also
-be set later, in the app's Settings. The first time the agent reaches the gateway it pins the
-gateway's certificate; Settings shows the fingerprint to compare with the gateway's.
+The first time the agent reaches the gateway it pins the gateway's certificate; Settings shows the
+fingerprint to compare with the gateway's. An update closes the app on every account signed in; run
+by double-clicking, it starts the new one again afterwards.
+
+**A development build.** `publish.ps1`'s folders carry install scripts instead. Copy
+`artifacts\Gateway` or `artifacts\Client` to the machine and, as administrator, run
+`.\install-gateway.ps1`, or `.\install-client.ps1 -Gateway gw01 -AccessKey <key>`; `-Uninstall`
+removes it again. They use the same folders and services as the installers, so remove one kind
+before installing the other.
 
 ## Facilities
 
@@ -125,6 +161,7 @@ gateway's certificate; Settings shows the fingerprint to compare with the gatewa
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
 | `password` | Handed to the connector as `EASYVPN_PASSWORD`. Make the encrypted form with `EasyVPN.Gateway.exe protect`; only this gateway can decrypt it. |
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. |
+| `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
 | `check` | `host:port` inside the facility that answers when it is reachable. Strongly recommended: without it a connector that runs without error is taken at its word, and switching cannot confirm the previous facility is really down. |
 | `timeout` | Seconds to wait for the check after the connector has run (default 120); allow time to sign in for `manual`. |
@@ -146,11 +183,75 @@ private folder for it). Exit code 0 is success; whatever it prints shows in the 
 To add or adapt one, put it in `%ProgramData%\EasyVPN\Gateway\connectors\`, which wins over the
 shipped folder and survives updates.
 
+## Layer 2 facilities
+
+Some VPNs give the gateway the facility's Ethernet itself, not just its networks: a Tosibox Lock in
+Layer 2 mode, for one. Mark such a facility `"layer2": true` and the workstation gets the same. Its
+**EasyVPN L2** adapter sits on the facility's LAN, with an address from the facility's DHCP (or one
+set by hand), and broadcasts, ARP and PROFINET DCP discovery work: in TIA Portal, choose
+*EasyVPN L2* as the PG/PC interface to find accessible devices.
+
+```text
+WORKSTATION                                                   GATEWAY
+ TIA Portal ─▶ "EasyVPN L2" ══ Ethernet frames, as WebSocket ══▶ "EasyVPN L2"
+               (TAP adapter)   messages on HTTPS :8420           (TAP adapter)
+                                                                       ║  Windows Network Bridge
+                                                                 Tosibox's Layer 2 adapter ─▶ Lock ─▶ plant LAN
+```
+
+- The frames go over the gateway's API port, with the same access key and pinned certificate: no
+  other port, no other firewall rule. On the gateway, its own *EasyVPN L2* adapter is bridged, once,
+  with the VPN client's Layer 2 adapter.
+- The link opens only while the facility is connected. When the facility stops answering or is
+  disconnected, the link ends and both adapters' cables are pulled out.
+- One workstation at a time: a newer one takes the link over, and the other one's app says who did.
+  Routed facilities carry on as before.
+- `routes` and `dns` are not used: the facility's LAN is simply the adapter's network. Its `check`
+  is reached from the gateway through the bridge, so the bridge needs an address on that LAN (DHCP
+  from the facility will do).
+
+```json
+{ "id": "aqua-hitra", "name": "Hitra hatchery", "customer": "Aqua Nord", "connector": "manual",
+  "layer2": true, "check": "192.168.20.10:102", "timeout": 180 }
+```
+
+**Setting it up.** Both ends need OpenVPN's TAP-Windows6 driver: install OpenVPN 2.6 or later,
+with its TAP driver. Then, as administrator, add the adapter:
+
+- with the install scripts: `.\install-gateway.ps1 -Layer2` on the gateway, and
+  `.\install-client.ps1 -Layer2` on each workstation that needs Layer 2;
+- on a machine installed from the MSI, by hand:
+
+  ```powershell
+  & "$env:ProgramFiles\OpenVPN\bin\tapctl.exe" create --name "EasyVPN L2" --hwid root\tap0901
+  # Workstations only: a default gateway from a facility's DHCP must never win over the PC's own.
+  Set-NetIPInterface -InterfaceAlias "EasyVPN L2" -AddressFamily IPv4 -InterfaceMetric 500
+  ```
+
+Then, on the gateway only, bridge the two adapters. Windows has no supported command for this, so
+it is done once by hand: in Network Connections (`ncpa.cpl`) select *EasyVPN L2* and the VPN
+client's Layer 2 adapter, right-click, and choose *Bridge Connections*. Bridge VPN adapters only,
+never the gateway's own network. A Layer 2 facility on a gateway without its *EasyVPN L2* adapter
+fails straight away, saying so.
+
+**Try it on the real gateway before relying on it.** The pieces this could not be tested with:
+
+- Tosibox does not document its Windows Layer 2 adapter, or putting it in a bridge. Check that the
+  TOSIBOX Key keeps working with its adapter bridged. Other OpenVPN-based Layer 2 clients, such as
+  eWON eCatcher, work the same way.
+- Frames travel over TCP (TLS), which is fine for engineering traffic; heavy packet loss on the path
+  makes it sluggish, as with any VPN over TCP.
+- Bridge one VPN's Layer 2 adapter per gateway if you can. With more, only the connected facility's
+  adapter carries anything, since EasyVPN connects one facility at a time.
+- A program that grabs any free TAP adapter (an OpenVPN TAP profile without `dev-node`, eCatcher)
+  could take *EasyVPN L2* while it is not in use; point those at an adapter of their own.
+
 ## Security
 
 - The gateway API needs the access key and is served over TLS with the gateway's own certificate,
   which workstations pin. The relay uses the same certificate (pinned by gost) and the same key.
 - The relay opens only while a facility is connected, and then only to its `routes` and DNS servers.
+  The Layer 2 port opens only while a Layer 2 facility is connected, behind the same key and certificate.
 - Keys, the private key and VPN passwords live in `%ProgramData%\EasyVPN`, readable by SYSTEM and
   administrators only; passwords are also DPAPI-encrypted to the gateway machine.
 - The agent's API listens on 127.0.0.1 only, refuses other host names (DNS rebinding) and requires a
@@ -162,8 +263,9 @@ shipped folder and survives updates.
 - **TCP and UDP only.** The tunnel carries connections, not packets: `ping` through it does not
   reach the facility (use the check, or a TCP port). Connections the facility opens towards the
   workstation are not carried.
-- **No Layer 2.** PROFINET DCP discovery and other Ethernet-level protocols do not cross any routed
-  VPN; address devices by IP.
+- **Layer 2 only where the VPN has it.** PROFINET DCP discovery and other Ethernet-level protocols
+  reach a workstation only from a [Layer 2 facility](#layer-2-facilities), one workstation at a
+  time. Through a routed facility, address devices by IP.
 - **One facility at a time** for all workstations sharing a gateway. The app shows who switched it.
 - **The VPN client must let the gateway's own network in.** Some clients block local network access
   while connected (Cisco's "Allow local LAN access", GlobalProtect's "No direct access to local
@@ -180,3 +282,8 @@ still answers, and disconnecting. Also the agent's pinning, API guards and conne
 and the app against both. Creating the Wintun adapter and the routes needs the agent to run as a
 service (SYSTEM), as installed, and the vendor connectors need their VPN clients: try those on the
 real gateway, with `manual` first.
+
+For Layer 2: the gateway's Layer 2 port (the key, refusing links while no Layer 2 facility is
+connected), a Layer 2 facility failing cleanly on a gateway without the adapter, and the app showing
+Layer 2 facilities. Frames through real TAP adapters, the bridge and a TOSIBOX Key were not: they
+need administrator rights, the adapters and a Tosibox Lock.

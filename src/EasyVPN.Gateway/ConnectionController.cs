@@ -4,20 +4,22 @@ namespace EasyVPN.Gateway;
 /// The one facility connection the gateway carries, shared by every client.
 ///
 /// Connecting first takes down whatever was up, then runs the facility's connector, waits until
-/// the facility answers from here, and only then opens the relay to it: Connected means the
-/// facility was reached, not that a VPN client turned green. Each request supersedes the one
-/// before - an attempt still in progress is cancelled, and only the newest request is carried out.
+/// the facility answers from here, and only then opens the way in to it - the relay, or for a
+/// Layer 2 facility the Layer 2 port: Connected means the facility was reached, not that a VPN
+/// client turned green. Each request supersedes the one before - an attempt still in progress is
+/// cancelled, and only the newest request is carried out.
 ///
 /// Taking a facility down is only done once its check has stopped answering. Two facilities often
 /// use the same addresses, and a VPN left up underneath would quietly take the next one's traffic.
 ///
-/// While connected the facility is checked every few seconds. When it stops answering, the relay
+/// While connected the facility is checked every few seconds. When it stops answering, the way in
 /// closes until it answers again, so client traffic is blocked rather than sent some other way.
 /// </summary>
 public sealed class ConnectionController(
     FacilityCatalog catalog,
     Connectors connectors,
     Relay relay,
+    Layer2Port layer2,
     GatewaySettings settings,
     RecentLog log) : BackgroundService
 {
@@ -114,6 +116,13 @@ public sealed class ConnectionController(
 
     private async Task ConnectAsync(int request, Facility facility, CancellationToken ct)
     {
+        if (facility.Layer2 && TapAdapter.Find(Defaults.Layer2Adapter) is null)
+        {
+            Set(request, ConnectionState.Failed,
+                $"{facility.Name} is a Layer 2 facility, and this gateway has no \"{Defaults.Layer2Adapter}\" TAP adapter bridged with its VPN's adapter.");
+            return;
+        }
+
         _up = facility;
         var code = await connectors.RunAsync(facility, "Connect", ct);
         if (code != 0)
@@ -137,7 +146,7 @@ public sealed class ConnectionController(
             }
         }
 
-        relay.Open(facility);
+        OpenWayIn(facility);
         Set(request, ConnectionState.Connected, $"Connected to {facility.Name}");
     }
 
@@ -147,10 +156,23 @@ public sealed class ConnectionController(
         await TearDownAsync(request);
     }
 
-    /// <summary>Closes the relay and disconnects what is up. False, and Failed, if it still answers.</summary>
-    private async Task<bool> TearDownAsync(int request)
+    /// <summary>How clients reach a connected facility: the relay for a routed one, the Layer 2 port for a bridged one.</summary>
+    private void OpenWayIn(Facility facility)
+    {
+        if (facility.Layer2) layer2.Open();
+        else relay.Open(facility);
+    }
+
+    private void CloseWayIn()
     {
         relay.Close();
+        layer2.Close();
+    }
+
+    /// <summary>Closes the way in and disconnects what is up. False, and Failed, if it still answers.</summary>
+    private async Task<bool> TearDownAsync(int request)
+    {
+        CloseWayIn();
         if (_up is not { } facility) return true;
 
         await connectors.RunAsync(facility, "Disconnect", CancellationToken.None);
@@ -209,13 +231,13 @@ public sealed class ConnectionController(
                     misses = 0;
                     if (state == ConnectionState.Interrupted)
                     {
-                        relay.Open(facility);
+                        OpenWayIn(facility);
                         Set(request, ConnectionState.Connected, $"{facility.Name} answers again");
                     }
                 }
                 else if (state == ConnectionState.Connected && ++misses >= MissesBeforeInterrupted)
                 {
-                    relay.Close();
+                    CloseWayIn();
                     Set(request, ConnectionState.Interrupted, $"{check} stopped answering. Traffic is blocked until it answers again.");
                 }
             }

@@ -9,8 +9,13 @@
     downloaded from their releases and checked against the hashes pinned below.
 
         .\build\publish.ps1
+        .\build\publish.ps1 -Version 1.2.3    stamped with that version (release.ps1 does this)
 #>
-param([string]$Configuration = 'Release')
+param(
+    [string]$Configuration = 'Release',
+    [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
+    [string]$Version
+)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -55,9 +60,11 @@ function Get-Binary([string]$name) {
 }
 
 function Publish-Project([string]$project, [string]$output) {
+    # Without -Version, the one in Directory.Build.props.
+    $stamp = if ($Version) { "-p:Version=$Version" }
     dotnet publish (Join-Path $root "src\$project\$project.csproj") -c $Configuration -r win-x64 --self-contained `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-        -p:DebugType=None -o $output
+        -p:DebugType=None $stamp -o $output
     if ($LASTEXITCODE) { throw "Publishing $project failed." }
 }
 
