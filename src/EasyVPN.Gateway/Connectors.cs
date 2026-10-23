@@ -5,10 +5,13 @@ namespace EasyVPN.Gateway;
 /// <c>Disconnect</c>. A connector drives one kind of VPN client and gets the facility's settings
 /// as environment variables, plus a private work folder. A script of the same name in the data
 /// folder's connectors\ wins over the one shipped, so an adapted connector survives an update.
+/// <c>Check</c> asks it, without connecting anything, whether the facility could be connected
+/// from here: its VPN client installed, its settings in place.
 /// </summary>
 public sealed class Connectors(RecentLog log)
 {
     private static readonly TimeSpan Limit = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan CheckLimit = TimeSpan.FromSeconds(30);
 
     /// <returns>The script's exit code: 0 for success.</returns>
     public async Task<int> RunAsync(Facility facility, string action, CancellationToken ct)
@@ -20,6 +23,33 @@ public sealed class Connectors(RecentLog log)
             return -1;
         }
 
+        var environment = EnvironmentOf(facility);
+        if (!string.IsNullOrEmpty(facility.Password))
+            environment["EASYVPN_PASSWORD"] = Secret.Reveal(facility.Password);
+
+        return await PowerShell.RunFileAsync(script, [action], environment, Limit, line => log.Add($"{facility.Connector}: {line}"), ct);
+    }
+
+    public async Task<CheckResult> CheckAsync(Facility facility, CancellationToken ct)
+    {
+        var script = Find(facility.Connector);
+        if (script is null)
+            return new(facility.Name, CheckLevel.Problem, $"There is no connector called '{facility.Connector}'.", FacilityId: facility.Id);
+        // A connector of one's own, written before there was a Check.
+        if (!(await File.ReadAllTextAsync(script, ct)).Contains("'Check'", StringComparison.Ordinal))
+            return new(facility.Name, CheckLevel.Warning, $"The {facility.Connector} connector has no Check, so this cannot tell whether it is ready.", FacilityId: facility.Id);
+
+        // The password is not needed to check, so it is not decrypted for it.
+        var lines = new List<string>();
+        var code = await PowerShell.RunFileAsync(script, ["Check"], EnvironmentOf(facility), CheckLimit, lines.Add, ct);
+        var text = string.Join(" ", lines);
+        return code == 0
+            ? new(facility.Name, CheckLevel.Ok, text.Length > 0 ? text : "Ready", FacilityId: facility.Id)
+            : new(facility.Name, CheckLevel.Problem, text.Length > 0 ? text : $"The {facility.Connector} connector's check failed (exit code {code}).", FacilityId: facility.Id);
+    }
+
+    private static Dictionary<string, string> EnvironmentOf(Facility facility)
+    {
         var work = Directory.CreateDirectory(Path.Combine(GatewaySettings.Folder, "work", facility.Id)).FullName;
         var environment = new Dictionary<string, string>
         {
@@ -28,10 +58,7 @@ public sealed class Connectors(RecentLog log)
         };
         foreach (var (key, value) in facility.Settings)
             environment[$"EASYVPN_{key.ToUpperInvariant()}"] = value;
-        if (!string.IsNullOrEmpty(facility.Password))
-            environment["EASYVPN_PASSWORD"] = Secret.Reveal(facility.Password);
-
-        return await PowerShell.RunFileAsync(script, [action], environment, Limit, line => log.Add($"{facility.Connector}: {line}"), ct);
+        return environment;
     }
 
     private static string? Find(string name)

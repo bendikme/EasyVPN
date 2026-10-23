@@ -1,7 +1,8 @@
 <#
     Builds EasyVPN into artifacts\, ready to copy to the machines:
 
-      artifacts\Gateway   for the gateway: EasyVPN.Gateway.exe, gost.exe, connectors\, install-gateway.ps1
+      artifacts\Gateway   for the gateway: EasyVPN.Gateway.exe (the service), EasyVPN.GatewayApp.exe
+                          (its status, in the notification area), gost.exe, connectors\, install-gateway.ps1
       artifacts\Client    for each workstation: EasyVPN.exe, EasyVPN.Agent.exe, gost.exe, wintun.dll,
                           install-client.ps1
 
@@ -76,6 +77,7 @@ $gost = Get-Binary gost
 $wintun = Get-Binary wintun
 
 Publish-Project EasyVPN.Gateway $gateway
+Publish-Project EasyVPN.GatewayApp $gateway
 Copy-Item $gost.File, "$PSScriptRoot\install-gateway.ps1" $gateway
 Copy-Item $gost.License (Join-Path $gateway 'gost-LICENSE.txt')
 

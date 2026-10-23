@@ -8,14 +8,23 @@
 
     Settings:  name   the connection's name (required)
                user   the user name; the password is the facility's "password"
+
+    Check: the connection exists, for all users.
 #>
-param([ValidateSet('Connect', 'Disconnect')][string]$Action)
+param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
 $name = $env:EASYVPN_NAME
 if (-not $name) { throw 'Set "name" to the Windows VPN connection to dial.' }
 $phonebook = "$env:ProgramData\Microsoft\Network\Connections\Pbk\rasphone.pbk"
+
+if ($Action -eq 'Check') {
+    $connection = Get-VpnConnection -AllUserConnection -Name $name -ErrorAction SilentlyContinue
+    if (-not $connection) { throw "There is no Windows VPN connection called '$name' for all users: make it with Add-VpnConnection -AllUserConnection." }
+    Write-Output "Windows VPN connection '$name', $($connection.TunnelType) to $($connection.ServerAddress)"
+    return
+}
 
 if ($Action -eq 'Connect') {
     # rasdial only takes the password on its command line. On the gateway, only administrators

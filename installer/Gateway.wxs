@@ -4,8 +4,13 @@
   EasyVPN Gateway - Windows Installer authoring (WiX v5, v4 schema). Build it with build\release.ps1.
 
   A per-machine package for the machine (or VM) that has the customers' VPN clients installed: the
-  EasyVPN Gateway service in %ProgramFiles%\EasyVPN Gateway, and a firewall rule for its API and
-  relay. The same folder, service and rule as build\install-gateway.ps1.
+  EasyVPN Gateway service in %ProgramFiles%\EasyVPN Gateway, a firewall rule for its API and relay,
+  and the EasyVPN Gateway app - the gateway's status, access key, fingerprint and facilities, in
+  the notification area of everyone who signs in to the gateway. The same folder, service, rule
+  and app as build\install-gateway.ps1.
+
+  What a facility needs beyond that - its customer's VPN client; OpenVPN for Layer 2 - is installed
+  separately. The app checks for it and says what is missing.
 
   The settings, access key, certificate, facilities and any connectors of one's own live in
   %ProgramData%\EasyVPN\Gateway, which nothing here touches: install, upgrade and uninstall all
@@ -48,6 +53,7 @@
     <Feature Id="Main" Title="EasyVPN Gateway" AllowAbsent="no" AllowAdvertise="no">
       <ComponentGroupRef Id="ApplicationFiles" />
       <ComponentRef Id="Service" />
+      <ComponentRef Id="App" />
     </Feature>
 
     <Component Id="Service" Directory="INSTALLFOLDER">
@@ -78,6 +84,42 @@
                             Profile="all" />
     </Component>
 
+    <!-- The app, for everyone who signs in: in the Start menu, and started in the notification
+         area at sign-in. -->
+    <Component Id="App" Directory="INSTALLFOLDER">
+      <File Id="AppExe" Source="$(var.PublishDir)\EasyVPN.GatewayApp.exe" KeyPath="yes">
+        <Shortcut Id="AppShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="EasyVPN Gateway"
+                  Description="The EasyVPN gateway's status, access key and facilities"
+                  WorkingDirectory="INSTALLFOLDER" />
+      </File>
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="EasyVPN Gateway"
+                     Type="string"
+                     Value="&quot;[#AppExe]&quot; --tray" />
+    </Component>
+
+    <!-- Closing its window only hides the app, so it is ended instead, for every user, first thing
+         in the install's script: before this or the previous version removes any file, so none is
+         in use. (By default WiX would do it just before InstallFiles, after RemoveFiles.) -->
+    <util:CloseApplication Id="CloseApp" Target="EasyVPN.GatewayApp.exe" TerminateProcess="0" RebootPrompt="no" />
+    <InstallExecuteSequence>
+      <Custom Action="override Wix4CloseApplications_X64" After="InstallInitialize" />
+    </InstallExecuteSequence>
+
+    <!-- Open the app when someone installed it by double-clicking, so the gateway's address, key
+         and fingerprint are right there. This runs in the UI sequence, as that person and not
+         elevated; a silent install (/qn, /qb) has no UI sequence, so never starts it. -->
+    <CustomAction Id="LaunchApp"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]EasyVPN.GatewayApp.exe&quot;"
+                  Return="asyncNoWait" />
+    <InstallUISequence>
+      <Custom Action="LaunchApp" After="ExecuteAction" Condition="NOT Installed" />
+    </InstallUISequence>
+
     <Icon Id="easyvpn.ico" SourceFile="$(sys.SOURCEFILEDIR)..\src\EasyVPN\Assets\easyvpn.ico" />
     <Property Id="ARPPRODUCTICON" Value="easyvpn.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/bendikme/EasyVPN" />
@@ -86,11 +128,13 @@
   </Package>
 
   <Fragment>
-    <!-- Everything else publish.ps1 put in the folder (gost, the connectors, the sample facilities,
-         the licences), harvested at build time so a new file is packaged without listing it here. -->
+    <!-- Everything else publish.ps1 put in the folder (gost, the connectors, layer2.ps1, the sample
+         facilities, the licences), harvested at build time so a new file is packaged without
+         listing it here. -->
     <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.PublishDir)\**">
         <Exclude Files="$(var.PublishDir)\EasyVPN.Gateway.exe" />
+        <Exclude Files="$(var.PublishDir)\EasyVPN.GatewayApp.exe" />
         <Exclude Files="$(var.PublishDir)\install-gateway.ps1" />
       </Files>
     </ComponentGroup>

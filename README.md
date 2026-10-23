@@ -57,7 +57,8 @@ our own is involved, and the vendor clients run untouched, as they were designed
 | `src\EasyVPN.Gateway\connectors` | One script per kind of VPN client |
 | `src\EasyVPN.Agent` | The workstation service: tunnel, routes and DNS (`network.ps1`), session |
 | `src\EasyVPN` | The app: WPF, using DynatecRDM's design system (`Themes\`), light and dark |
-| `src\EasyVPN.Shared` | API contracts, and the gost and PowerShell helpers both services use |
+| `src\EasyVPN.GatewayApp` | The EasyVPN Gateway app, on the gateway's desktop: its status, what workstations need, and what it is missing |
+| `src\EasyVPN.Shared` | API contracts; the gost, PowerShell and Layer 2 (`layer2.ps1`) helpers the services share |
 | `build` | `publish.ps1`, `release.ps1` and the two install scripts |
 | `installer` | The two MSIs, gateway and workstation (WiX 5) |
 
@@ -101,17 +102,29 @@ keys and facilities in `%ProgramData%\EasyVPN`.
 
 **The gateway.** A Windows 10/11 or Server machine, often a VM, with the customers' VPN clients
 installed. Run `EasyVPN-Gateway-<version>-x64.msi` on it. It installs the `EasyVPN Gateway` service
-in `%ProgramFiles%\EasyVPN Gateway` and opens TCP 8420 (API) and 8421 (relay) in the firewall. Then,
-in an administrator PowerShell, get the address, access key and certificate fingerprint for the
-workstations:
+in `%ProgramFiles%\EasyVPN Gateway`, opens TCP 8420 (API) and 8421 (relay) in the firewall, and
+installs the **EasyVPN Gateway app**, which opens when the installer finishes and then lives in the
+notification area of everyone who signs in to the gateway (and in the Start menu). It shows:
 
-```powershell
-& "$env:ProgramFiles\EasyVPN Gateway\EasyVPN.Gateway.exe" info
-```
+- the connection the gateway carries, who asked for it, and its activity; a facility can be
+  connected from there too, to try it without a workstation;
+- what each workstation needs: the gateway's address, its access key (*Show the access key* asks
+  for administrator rights) and its certificate fingerprint, each a click from the clipboard;
+- every facility, and whether it is ready: its connector checks, without connecting anything, that
+  its VPN client is installed and its settings are in place (the profile file is there, the
+  Windows VPN connection exists, …);
+- what the gateway itself lacks: the firewall rule, and for Layer 2 OpenVPN, the *EasyVPN L2*
+  adapter and its bridge, each with a button that fixes it or shows where to;
+- mistakes in `facilities.json`, which *Edit facilities* opens in Notepad as administrator.
+  *Encrypt a password* makes a facility's `password`.
 
 Facilities go in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which is read again whenever it
 changes. For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
 desktop that can be reached with Remote Desktop: the app's *Open gateway desktop* button goes there.
+`EasyVPN.Gateway.exe info`, in an administrator console, prints the address, key and fingerprint too.
+
+The customers' VPN clients are not part of EasyVPN: install each one the way its vendor says. The
+gateway app says which facility is still missing its client.
 
 **Each workstation.** Run `EasyVPN-Client-<version>-x64.msi`. It installs the `EasyVPN Agent`
 service and the app in `%ProgramFiles%\EasyVPN`, with a Start menu shortcut, and starts the app:
@@ -162,7 +175,7 @@ before installing the other.
 | `customer` | Groups the list in the app. |
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
-| `password` | Handed to the connector as `EASYVPN_PASSWORD`. Make the encrypted form with `EasyVPN.Gateway.exe protect`; only this gateway can decrypt it. |
+| `password` | Handed to the connector as `EASYVPN_PASSWORD`. Make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`); only this gateway can decrypt it. |
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
@@ -183,6 +196,8 @@ before installing the other.
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a
 private folder for it). Exit code 0 is success; whatever it prints shows in the app's Activity.
+`<name>.ps1 Check` (without the password) must not connect anything: it says whether the facility
+could be connected from here, exit code 0 for ready, and what it prints shows in the gateway app.
 To add or adapt one, put it in `%ProgramData%\EasyVPN\Gateway\connectors\`, which wins over the
 shipped folder and survives updates.
 
@@ -218,24 +233,21 @@ WORKSTATION                                                   GATEWAY
   "layer2": true, "check": "192.168.20.10:102", "timeout": 180 }
 ```
 
-**Setting it up.** Both ends need OpenVPN's TAP-Windows6 driver: install OpenVPN 2.6 or later,
-with its TAP driver. Then, as administrator, add the adapter:
+**Setting it up.** Both ends need OpenVPN's TAP-Windows6 driver, which EasyVPN does not ship:
+install OpenVPN 2.6 or later, with its TAP driver, on the gateway and on each workstation that uses
+Layer 2 facilities. Its `tapctl` then makes the *EasyVPN L2* adapter, as SYSTEM:
 
-- with the install scripts: `.\install-gateway.ps1 -Layer2` on the gateway, and
-  `.\install-client.ps1 -Layer2` on each workstation that needs Layer 2;
-- on a machine installed from the MSI, by hand:
+- on a **workstation** the agent does it by itself, the first time a Layer 2 facility is connected
+  (and gives it a high metric, so a default gateway from a facility's DHCP never wins over the PC's
+  own). Without OpenVPN, connecting says so and where to get it;
+- on the **gateway**, the gateway app's *Layer 2* check has an *Add the adapter* button. Then bridge
+  the two adapters, once, by hand, since Windows has no supported command for it: in Network
+  Connections (the check's *Open Network Connections* button) select *EasyVPN L2* and the VPN
+  client's Layer 2 adapter, right-click, and choose *Bridge Connections*. Bridge VPN adapters only,
+  never the gateway's own network. The check turns green once it is bridged.
 
-  ```powershell
-  & "$env:ProgramFiles\OpenVPN\bin\tapctl.exe" create --name "EasyVPN L2" --hwid root\tap0901
-  # Workstations only: a default gateway from a facility's DHCP must never win over the PC's own.
-  Set-NetIPInterface -InterfaceAlias "EasyVPN L2" -AddressFamily IPv4 -InterfaceMetric 500
-  ```
-
-Then, on the gateway only, bridge the two adapters. Windows has no supported command for this, so
-it is done once by hand: in Network Connections (`ncpa.cpl`) select *EasyVPN L2* and the VPN
-client's Layer 2 adapter, right-click, and choose *Bridge Connections*. Bridge VPN adapters only,
-never the gateway's own network. A Layer 2 facility on a gateway without its *EasyVPN L2* adapter
-fails straight away, saying so.
+The install scripts' `-Layer2` switch adds the adapter at install time instead. A Layer 2 facility on
+a gateway without its *EasyVPN L2* adapter fails straight away, saying so.
 
 **Try it on the real gateway before relying on it.** The pieces this could not be tested with:
 
@@ -260,6 +272,9 @@ fails straight away, saying so.
 - The agent's API listens on 127.0.0.1 only, refuses other host names (DNS rebinding) and requires a
   custom header for changes (so a web page cannot drive it). Any user signed in to the workstation
   can use it, including choosing the gateway: fine for an engineering PC, worth knowing on a shared one.
+- The gateway app talks to the gateway on 127.0.0.1:8428, guarded the same way, which answers
+  nothing else. Anyone signed in to the gateway can see its status and connect or disconnect a
+  facility, as a workstation can, but not the access key: that takes an administrator.
 
 ## Limits
 

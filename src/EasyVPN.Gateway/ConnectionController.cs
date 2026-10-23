@@ -119,7 +119,7 @@ public sealed class ConnectionController(
         if (facility.Layer2 && TapAdapter.Find(Defaults.Layer2Adapter) is null)
         {
             Set(request, ConnectionState.Failed,
-                $"{facility.Name} is a Layer 2 facility, and this gateway has no \"{Defaults.Layer2Adapter}\" TAP adapter bridged with its VPN's adapter.");
+                $"{facility.Name} is a Layer 2 facility, and this gateway has no \"{Defaults.Layer2Adapter}\" adapter yet. The EasyVPN Gateway app on the gateway sets it up.");
             return;
         }
 

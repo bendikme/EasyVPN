@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The EasyVPN Gateway app: the gateway's status, in the notification area of its desktop. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <!-- For NotifyIcon only. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>EasyVPN.GatewayApp</RootNamespace>
+    <AssemblyName>EasyVPN.GatewayApp</AssemblyName>
+    <ApplicationIcon>..\EasyVPN\Assets\easyvpn.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFO0003 asks WinForms apps to set DPI awareness in code; this is a WPF app, so the manifest is right. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EasyVPN.Shared\EasyVPN.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- WinForms' implicit usings collide with WPF (Application, Brush, Color, …), so its few types are written out in full. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <!-- The workstation app's design system, helpers and font, so both apps look and behave the same;
+       and the gateway's password encryption, so a password can be encrypted here. -->
+  <ItemGroup>
+    <Compile Include="..\EasyVPN\ObservableObject.cs;..\EasyVPN\ThemeService.cs;..\EasyVPN\VisibilityConverter.cs" Link="Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\EasyVPN.Gateway\Secret.cs" Link="Shared\Secret.cs" />
+    <Page Include="..\EasyVPN\Themes\*.xaml" Link="Themes\%(Filename)%(Extension)" />
+    <Resource Include="..\EasyVPN\Assets\easyvpn.ico" Link="Assets\easyvpn.ico" />
+    <Resource Include="..\EasyVPN\Assets\Fonts\*.ttf" Link="Assets\Fonts\%(Filename)%(Extension)" />
+    <None Include="..\EasyVPN\Assets\Fonts\OFL.txt" Link="Assets\Fonts\OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+</Project>

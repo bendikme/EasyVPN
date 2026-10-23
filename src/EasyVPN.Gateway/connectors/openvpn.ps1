@@ -4,8 +4,10 @@
     Settings:  config   full path to the .ovpn file (required)
                user     the user name, when the server asks for one; the password is the
                         facility's "password"
+
+    Check: OpenVPN installed, and the profile there.
 #>
-param([ValidateSet('Connect', 'Disconnect')][string]$Action)
+param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
@@ -14,6 +16,14 @@ $authFile = Join-Path $env:EASYVPN_WORK 'auth.txt'
 $logFile = Join-Path $env:EASYVPN_WORK 'openvpn.log'
 # OpenVPN exits cleanly, taking its routes with it, when this event is set (its --service option).
 $exitEvent = "EasyVPN_openvpn_$env:EASYVPN_FACILITY"
+
+if ($Action -eq 'Check') {
+    if (-not (Test-Path $openvpn)) { throw "OpenVPN 2.6 or later is not installed ($openvpn)." }
+    if (-not $env:EASYVPN_CONFIG) { throw 'Set "config" to the .ovpn file.' }
+    if (-not (Test-Path $env:EASYVPN_CONFIG)) { throw "The profile $env:EASYVPN_CONFIG is not there." }
+    Write-Output "OpenVPN $((Get-Item $openvpn).VersionInfo.ProductVersion), profile $env:EASYVPN_CONFIG"
+    return
+}
 
 function Stop-OpenVpn {
     try {

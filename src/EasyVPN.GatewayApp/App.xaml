@@ -1,0 +1,15 @@
+<Application x:Class="EasyVPN.GatewayApp.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Replaced at startup, and whenever Windows changes app mode, by ThemeService. -->
+                <ResourceDictionary Source="Themes/Palette.Dark.xaml" />
+                <ResourceDictionary Source="Themes/Theme.xaml" />
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

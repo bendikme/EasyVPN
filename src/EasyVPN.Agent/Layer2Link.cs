@@ -56,6 +56,8 @@ public sealed class Layer2Link(RecentLog log)
     {
         try
         {
+            // Made the first time a Layer 2 facility is used, when OpenVPN's TAP driver is there.
+            await Layer2Setup.EnsureAdapterAsync(workstation: true, log.Add, ct);
             using var tap = TapAdapter.Open(Defaults.Layer2Adapter);
             using var socket = await gateway.OpenLayer2Async(ct);
             tap.SetConnected(true);

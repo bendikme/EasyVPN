@@ -26,7 +26,7 @@
     <StackPanel Margin="24,20,24,22">
         <TextBlock Text="Gateway" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
         <TextBlock Style="{StaticResource HintStyle}"
-                   Text="The machine that runs the customers' VPN clients. On it, EasyVPN.Gateway.exe info prints all three of these." />
+                   Text="The machine that runs the customers' VPN clients. On it, the EasyVPN Gateway app shows all three of these." />
 
         <TextBlock Style="{StaticResource LabelStyle}" Text="Address" />
         <TextBox x:Name="GatewayBox" Style="{StaticResource AppTextBoxStyle}" />
@@ -54,7 +54,7 @@
                        Foreground="{DynamicResource TextSecondaryBrush}" />
         </DockPanel>
         <TextBlock Style="{StaticResource HintStyle}"
-                   Text="Pinned the first time this PC reaches the gateway, and the only one accepted after that. It should match what EasyVPN.Gateway.exe info shows." />
+                   Text="Pinned the first time this PC reaches the gateway, and the only one accepted after that. It should match what the EasyVPN Gateway app shows." />
 
         <Border Style="{StaticResource AppSeparatorStyle}" Margin="0,20,0,16" />
 

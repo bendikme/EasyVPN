@@ -4,5 +4,6 @@
     <Project Path="src/EasyVPN.Gateway/EasyVPN.Gateway.csproj" />
     <Project Path="src/EasyVPN.Agent/EasyVPN.Agent.csproj" />
     <Project Path="src/EasyVPN/EasyVPN.csproj" />
+    <Project Path="src/EasyVPN.GatewayApp/EasyVPN.GatewayApp.csproj" />
   </Folder>
 </Solution>

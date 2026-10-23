@@ -22,7 +22,7 @@
 
     <!-- Roboto, embedded from Assets/Fonts (Regular, SemiBold and Bold - the only weights the UI
          uses). Segoe UI stays behind it for any character Roboto has no glyph for. -->
-    <FontFamily x:Key="AppFontFamily">pack://application:,,,/EasyVPN;component/Assets/Fonts/#Roboto, Segoe UI</FontFamily>
+    <FontFamily x:Key="AppFontFamily">pack://application:,,,/Assets/Fonts/#Roboto, Segoe UI</FontFamily>
 
     <sys:Double x:Key="FontSizeSmall">11</sys:Double>
     <sys:Double x:Key="FontSizeNormal">13</sys:Double>

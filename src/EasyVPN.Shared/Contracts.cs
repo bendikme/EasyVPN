@@ -48,6 +48,47 @@ public sealed record GatewayStatus(
     int RelayPort,
     IReadOnlyList<LogLine> Log);
 
+/// <summary>
+/// The gateway as the EasyVPN Gateway app on its desktop shows it: the connection, what
+/// workstations need to reach it, and the facilities. The access key is not here: it takes an
+/// administrator to see it.
+/// </summary>
+public sealed record GatewayOverview(
+    GatewayStatus Status,
+    string Machine,
+    IReadOnlyList<string> Addresses,
+    int ApiPort,
+    string Thumbprint,
+    IReadOnlyList<FacilityInfo> Facilities,
+    IReadOnlyList<string> FacilityProblems,
+    string FacilitiesFile);
+
+public enum CheckLevel
+{
+    Ok,
+    Warning,
+    Problem,
+}
+
+/// <summary>
+/// One thing the gateway needs, and whether it has it. <see cref="Fix"/> names what the app can
+/// do about it: one of <see cref="GatewayFix"/>, or a web page. A facility's own check (its
+/// connector's) carries its <see cref="FacilityId"/>.
+/// </summary>
+public sealed record CheckResult(string Subject, CheckLevel Level, string Text, string? Fix = null, string? FacilityId = null);
+
+public static class GatewayFix
+{
+    /// <summary>The gateway service adds the "EasyVPN L2" adapter.</summary>
+    public const string Layer2Adapter = "layer2-adapter";
+
+    /// <summary>Network Connections, to bridge "EasyVPN L2" with the VPN's Layer 2 adapter.</summary>
+    public const string Bridge = "bridge";
+
+    /// <summary>Where OpenVPN, and with it the TAP-Windows6 driver, comes from.</summary>
+    public const string OpenVpnDownload = "https://openvpn.net/community-downloads/";
+}
+
 public sealed record AgentStatus(
     ConnectionState State,
     string? FacilityId,
@@ -67,6 +108,12 @@ public static class Defaults
     public const int GatewayApiPort = 8420;
     public const int GatewayRelayPort = 8421;
     public const string AgentUrl = "http://127.0.0.1:8429";
+
+    /// <summary>
+    /// The gateway's own desktop talks to it here: plain HTTP on 127.0.0.1 only, guarded as the
+    /// agent's API is. Nothing on it reveals the access key.
+    /// </summary>
+    public const int GatewayLocalPort = 8428;
 
     /// <summary>The name in the gateway's self-signed certificate. Clients pin the certificate, not the name.</summary>
     public const string CertificateName = "easyvpn-gateway";

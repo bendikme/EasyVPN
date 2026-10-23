@@ -48,14 +48,11 @@ if (-not (Get-Service $service -ErrorAction SilentlyContinue)) {
 }
 Start-Service $service
 
-if ($Layer2 -and -not (Get-NetAdapter -Name 'EasyVPN L2' -ErrorAction SilentlyContinue)) {
-    $tapctl = "$env:ProgramFiles\OpenVPN\bin\tapctl.exe"
-    if (-not (Test-Path $tapctl)) { throw 'Layer 2 needs the TAP-Windows6 driver: install OpenVPN 2.6 or later with its TAP driver, then run this again.' }
-    & $tapctl create --name 'EasyVPN L2' --hwid 'root\tap0901' | Out-Null
-    if ($LASTEXITCODE) { throw 'tapctl could not create the "EasyVPN L2" adapter.' }
-    # A default gateway from a facility's DHCP must never win over this PC's own.
-    Set-NetIPInterface -InterfaceAlias 'EasyVPN L2' -AddressFamily IPv4 -InterfaceMetric 500
-    Write-Output 'Added the "EasyVPN L2" adapter for Layer 2 facilities.'
+# The agent also adds it by itself, the first time a Layer 2 facility is connected.
+if ($Layer2) {
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Destination 'layer2.ps1') Create -Workstation
+    if ($LASTEXITCODE) { throw ($output | Select-Object -Last 1) }
+    $output
 }
 
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)

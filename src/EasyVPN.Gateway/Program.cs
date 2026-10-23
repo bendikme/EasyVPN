@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Serialization;
 using EasyVPN;
@@ -23,10 +25,15 @@ GostProcess.KillStrays();
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService(o => o.ServiceName = "EasyVPN.Gateway");
-builder.WebHost.ConfigureKestrel(k => k.Listen(
-    settings.ListenAddress is { } address ? IPAddress.Parse(address) : IPAddress.Any,
-    settings.ApiPort,
-    listen => listen.UseHttps(certificate.Certificate)));
+builder.WebHost.ConfigureKestrel(k =>
+{
+    k.Listen(
+        settings.ListenAddress is { } address ? IPAddress.Parse(address) : IPAddress.Any,
+        settings.ApiPort,
+        listen => listen.UseHttps(certificate.Certificate));
+    // For the EasyVPN Gateway app on this machine's desktop.
+    k.Listen(IPAddress.Loopback, Defaults.GatewayLocalPort);
+});
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton(certificate);
@@ -39,16 +46,27 @@ builder.Services.AddSingleton<FacilityCatalog>();
 builder.Services.AddSingleton<Connectors>();
 builder.Services.AddSingleton<Relay>();
 builder.Services.AddSingleton<Layer2Port>();
+builder.Services.AddSingleton<GatewayChecks>();
 builder.Services.AddSingleton<ConnectionController>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ConnectionController>());
 
 var app = builder.Build();
 
-// Nothing here is public: every call carries the access key.
+// Nothing here is public: every call from a workstation carries the access key. The app on this
+// machine's desktop has its own port, on 127.0.0.1 only, for /local and nothing else. It refuses
+// other Host names (a web page that rebinds its own name to 127.0.0.1) and, for changes, calls
+// without the app's header (which a page in a browser cannot add without asking first).
 app.Use((context, next) =>
 {
-    if (settings.Authorizes(context.Request)) return next(context);
-    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+    var request = context.Request;
+    var local = context.Connection.LocalPort == Defaults.GatewayLocalPort;
+    var allowed = local
+        ? request.Path.StartsWithSegments("/local")
+            && request.Host.Host is "127.0.0.1" or "localhost"
+            && (HttpMethods.IsGet(request.Method) || request.Headers.ContainsKey(Defaults.AgentHeader))
+        : !request.Path.StartsWithSegments("/local") && settings.Authorizes(request);
+    if (allowed) return next(context);
+    context.Response.StatusCode = local ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized;
     return Task.CompletedTask;
 });
 
@@ -68,8 +86,51 @@ api.MapPost("/disconnect", (HttpRequest request, ConnectionController controller
     return controller.Status;
 });
 
+var desktop = $"{Environment.MachineName} (gateway desktop)";
+var local = app.MapGroup("/local");
+local.MapGet("/overview", (ConnectionController controller, FacilityCatalog catalog) => new GatewayOverview(
+    controller.Status,
+    Environment.MachineName,
+    Addresses(),
+    settings.ApiPort,
+    certificate.Thumbprint,
+    [.. catalog.All().Select(f => f.ToInfo())],
+    catalog.Problems,
+    catalog.FilePath));
+local.MapGet("/checks", (GatewayChecks checks, CancellationToken ct) => checks.RunAsync(ct));
+local.MapPost("/connect/{id}", (string id, ConnectionController controller) =>
+    controller.Connect(id, desktop) ? Results.NoContent() : Results.NotFound());
+local.MapPost("/disconnect", (ConnectionController controller) =>
+{
+    controller.Disconnect(desktop);
+    return Results.NoContent();
+});
+// Adds the "EasyVPN L2" adapter: it takes SYSTEM or an administrator, which this service is.
+local.MapPost("/layer2", async (RecentLog log, CancellationToken ct) =>
+{
+    try
+    {
+        await Layer2Setup.EnsureAdapterAsync(workstation: false, log.Add, ct);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
 app.Run();
 return 0;
+
+// Where workstations can find this machine: the addresses of its networks with a way out.
+static IReadOnlyList<string> Addresses() =>
+[
+    .. NetworkInterface.GetAllNetworkInterfaces()
+        .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.GetIPProperties().GatewayAddresses.Count > 0)
+        .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+        .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
+        .Select(a => a.Address.ToString()),
+];
 
 static string ClientOf(HttpRequest request) =>
     request.Headers[Defaults.ClientHeader].FirstOrDefault()
@@ -90,6 +151,7 @@ static void PrintInfo()
 
         Facilities are defined in {Path.Combine(GatewaySettings.Folder, "facilities.json")}
         Clients also need TCP {settings.ApiPort} and {settings.RelayPort} open to this machine.
+        The EasyVPN Gateway app, in the Start menu, shows all of this and how the gateway is doing.
         """);
 }
 

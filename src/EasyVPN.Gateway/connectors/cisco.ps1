@@ -6,8 +6,9 @@
                group   the group to choose, when the server offers several
 
     The Cisco window is closed first, because vpncli cannot connect while it is open.
+    Check: the Cisco client installed, and a server set.
 #>
-param([ValidateSet('Connect', 'Disconnect')][string]$Action)
+param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
@@ -16,6 +17,12 @@ $vpncli = @(
     "${env:ProgramFiles(x86)}\Cisco\Cisco AnyConnect Secure Mobility Client\vpncli.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $vpncli) { throw 'Cisco Secure Client is not installed.' }
+
+if ($Action -eq 'Check') {
+    if (-not $env:EASYVPN_HOST) { throw 'Set "host" to the VPN server.' }
+    Write-Output "Cisco Secure Client, server $env:EASYVPN_HOST"
+    return
+}
 
 if ($Action -eq 'Disconnect') {
     & $vpncli disconnect

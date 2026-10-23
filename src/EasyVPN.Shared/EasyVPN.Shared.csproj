@@ -1,9 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- What the gateway, the agent and the app all speak: the API contracts, and the helpers the
+  <!-- What the gateway, the agent and the apps all speak: the API contracts, and the helpers the
        two services share for running gost and PowerShell. -->
   <PropertyGroup>
     <RootNamespace>EasyVPN</RootNamespace>
   </PropertyGroup>
+
+  <!-- Sets up the Layer 2 adapter; beside the exe of every project that uses this one. -->
+  <ItemGroup>
+    <None Update="layer2.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
 
 </Project>

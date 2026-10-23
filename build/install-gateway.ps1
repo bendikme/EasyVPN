@@ -1,6 +1,8 @@
 <#
-    Installs or updates the EasyVPN gateway on this machine, from the folder this script is in.
-    Run it as administrator on the machine (or VM) that has the customers' VPN clients installed.
+    Installs or updates the EasyVPN gateway on this machine, from the folder this script is in: the
+    EasyVPN Gateway service, and the EasyVPN Gateway app (the gateway's status, in the notification
+    area at sign-in, and in the Start menu). Run it as administrator on the machine (or VM) that has
+    the customers' VPN clients installed.
 
         .\install-gateway.ps1              install or update, then print what clients need
         .\install-gateway.ps1 -Layer2      and add the "EasyVPN L2" adapter for Layer 2 facilities
@@ -19,6 +21,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $service = 'EasyVPN.Gateway'
 $rule = 'EasyVPN Gateway'
+$shortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\EasyVPN Gateway.lnk"
+$run = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+# The app's files are in use while it runs, for anyone signed in.
+Get-Process EasyVPN.GatewayApp -ErrorAction SilentlyContinue | Stop-Process -Force
 
 if (Get-Service $service -ErrorAction SilentlyContinue) {
     Stop-Service $service
@@ -26,6 +33,8 @@ if (Get-Service $service -ErrorAction SilentlyContinue) {
 }
 if ($Uninstall) {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
+    Remove-Item $shortcut -ErrorAction SilentlyContinue
+    Remove-ItemProperty $run -Name 'EasyVPN Gateway' -ErrorAction SilentlyContinue
     Remove-Item $Destination -Recurse -Force -ErrorAction SilentlyContinue
     Write-Output "Removed. The data is still in $env:ProgramData\EasyVPN\Gateway."
     return
@@ -49,11 +58,17 @@ if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue))
 }
 Start-Service $service
 
-if ($Layer2 -and -not (Get-NetAdapter -Name 'EasyVPN L2' -ErrorAction SilentlyContinue)) {
-    $tapctl = "$env:ProgramFiles\OpenVPN\bin\tapctl.exe"
-    if (-not (Test-Path $tapctl)) { throw 'Layer 2 needs the TAP-Windows6 driver: install OpenVPN 2.6 or later with its TAP driver, then run this again.' }
-    & $tapctl create --name 'EasyVPN L2' --hwid 'root\tap0901' | Out-Null
-    if ($LASTEXITCODE) { throw 'tapctl could not create the "EasyVPN L2" adapter.' }
+$app = Join-Path $Destination 'EasyVPN.GatewayApp.exe'
+$link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+$link.TargetPath = $app
+$link.Description = "The EasyVPN gateway's status, access key and facilities"
+$link.Save()
+Set-ItemProperty $run -Name 'EasyVPN Gateway' -Value "`"$app`" --tray"
+
+if ($Layer2) {
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Destination 'layer2.ps1') Create
+    if ($LASTEXITCODE) { throw ($output | Select-Object -Last 1) }
+    $output
     # Windows has no supported command for this step, so it is done once by hand.
     Write-Output @'
 Added the "EasyVPN L2" adapter. Now bridge it with the Layer 2 adapter of the VPN client (the

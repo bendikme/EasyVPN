@@ -7,10 +7,15 @@
 
     Disconnecting is by hand too: EasyVPN will not call the facility disconnected, or connect
     another one, while its check still answers.
-#>
-param([ValidateSet('Connect', 'Disconnect')][string]$Action)
 
-if ($Action -eq 'Connect') {
+    Check has nothing to look at: any VPN client will do.
+#>
+param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
+
+if ($Action -eq 'Check') {
+    Write-Output 'Connected by hand, in its VPN client on this desktop.'
+}
+elseif ($Action -eq 'Connect') {
     Write-Output "Connect $env:EASYVPN_FACILITY with its VPN client on the gateway desktop."
 }
 else {

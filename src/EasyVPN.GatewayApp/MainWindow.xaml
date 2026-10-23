@@ -1,0 +1,274 @@
+<Window x:Class="EasyVPN.GatewayApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:EasyVPN"
+        xmlns:easy="clr-namespace:EasyVPN;assembly=EasyVPN.Shared"
+        Title="EasyVPN Gateway"
+        Style="{StaticResource AppWindowStyle}"
+        Icon="pack://application:,,,/Assets/easyvpn.ico"
+        Width="1060"
+        Height="760"
+        MinWidth="780"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <app:VisibilityConverter x:Key="Visible" />
+
+        <!-- Whether something is ready, as a coloured dot. Put the CheckLevel in Tag. -->
+        <Style x:Key="CheckDotStyle" TargetType="Ellipse">
+            <Setter Property="Width" Value="9" />
+            <Setter Property="Height" Value="9" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,5,12,0" />
+            <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="{x:Static easy:CheckLevel.Ok}">
+                    <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="{x:Static easy:CheckLevel.Warning}">
+                    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="{x:Static easy:CheckLevel.Problem}">
+                    <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="LabelStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,14,0,4" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        </Style>
+        <Style x:Key="HintStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,4,0,0" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        </Style>
+        <Style x:Key="CodeStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header: what this is, and whether the service behind it runs. -->
+        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
+            <DockPanel Margin="24,14">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Style="{StaticResource StatusPillStyle}" Margin="0,0,8,0" Visibility="{Binding ProblemText, Converter={StaticResource Visible}}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource WarningBrush}" />
+                            <TextBlock Text="{Binding ProblemText}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource StatusPillStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="ServiceDot" Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource SuccessBrush}" />
+                            <TextBlock Text="{Binding ServiceText}" />
+                        </StackPanel>
+                    </Border>
+                    <Button Margin="8,0,0,0"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Content="Start the service"
+                            ToolTip="Asks for administrator rights"
+                            Command="{Binding StartServiceCommand}"
+                            Visibility="{Binding ServiceOnline, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="EasyVPN Gateway" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
+                    <TextBlock Margin="0,2,0,0" Foreground="{DynamicResource TextMutedBrush}" Text="Connects the facility VPNs on this machine, for every EasyVPN workstation" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Style="{StaticResource AppScrollViewerStyle}">
+            <Grid Margin="24,20,24,24">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="400" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="340" />
+                </Grid.ColumnDefinitions>
+
+                <!-- ============================================================ connection and facilities -->
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="CONNECTION" />
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,14">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right"
+                                    VerticalAlignment="Top"
+                                    Style="{StaticResource DangerButtonStyle}"
+                                    Content="Disconnect"
+                                    Command="{Binding DisconnectCommand}"
+                                    Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Headline}" FontSize="{StaticResource FontSizeMedium}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <Border Style="{StaticResource StatusPillStyle}" Margin="12,0,0,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Style="{StaticResource StateDotStyle}" Tag="{Binding State}" />
+                                            <TextBlock Text="{Binding StateText}" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource Visible}}" />
+                                <TextBlock Style="{StaticResource HintStyle}" Text="{Binding AskedBy}" Visibility="{Binding AskedBy, Converter={StaticResource Visible}}" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <TextBlock Margin="0,10,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource DangerBrush}"
+                               Text="{Binding Error}"
+                               Visibility="{Binding Error, Converter={StaticResource Visible}}" />
+
+                    <DockPanel Margin="0,22,0,6">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding ChecksText}" />
+                            <Button Style="{StaticResource SecondaryButtonStyle}" Content="Check again" Command="{Binding CheckCommand}" />
+                            <Button Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}" Content="Encrypt a password…" Click="OnEncryptPasswordClick" />
+                            <Button Margin="8,0,0,0"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Content="Edit facilities…"
+                                    ToolTip="Opens facilities.json in Notepad, as administrator. The gateway reads it again as soon as it is saved."
+                                    Command="{Binding EditFacilitiesCommand}" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="FACILITIES" />
+                    </DockPanel>
+
+                    <ItemsControl ItemsSource="{Binding FacilityProblems}" Visibility="{Binding FacilityProblems, Converter={StaticResource Visible}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Margin="0,0,0,6" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" Text="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,14" Visibility="{Binding Facilities, Converter={StaticResource Visible}, ConverterParameter=invert}">
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="No facilities yet. Choose Edit facilities to add them; the README and facilities.sample.json, beside the program, show one of each kind." />
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="0" Visibility="{Binding Facilities, Converter={StaticResource Visible}}">
+                        <ItemsControl ItemsSource="{Binding Facilities}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="16,12" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right"
+                                                    Margin="12,0,0,0"
+                                                    VerticalAlignment="Top"
+                                                    Style="{StaticResource SecondaryButtonStyle}"
+                                                    Content="Connect"
+                                                    ToolTip="Connects it from here, as a workstation would: whatever is connected now is disconnected first"
+                                                    Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" />
+                                            <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding Level}" />
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                    <Border Style="{StaticResource StatusPillStyle}" Margin="10,0,0,0" Visibility="{Binding State, Converter={StaticResource Visible}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Style="{StaticResource StateDotStyle}" Tag="{Binding State}" />
+                                                            <TextBlock Text="{Binding State}" FontSize="{StaticResource FontSizeSmall}" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Style="{StaticResource HintStyle}" Text="{Binding Details}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding ReadinessText}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                </StackPanel>
+
+                <!-- ============================================================ for workstations, the gateway, activity -->
+                <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="FOR WORKSTATIONS" />
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,4,16,14">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource LabelStyle}" Text="Gateway address" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource SubtleButtonStyle}" Content="Copy"
+                                        Command="{Binding CopyCommand}" CommandParameter="{Binding GatewayAddress}" />
+                                <TextBlock Style="{StaticResource CodeStyle}" Text="{Binding GatewayAddress}" />
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource HintStyle}" Text="{Binding OtherAddresses}" Visibility="{Binding OtherAddresses, Converter={StaticResource Visible}}" />
+
+                            <TextBlock Style="{StaticResource LabelStyle}" Text="Access key" />
+                            <Button HorizontalAlignment="Left" Style="{StaticResource SecondaryButtonStyle}" Content="Show the access key…" Command="{Binding ShowAccessKeyCommand}" />
+                            <TextBlock Style="{StaticResource HintStyle}" Text="Asks for administrator rights: whoever has the key can use the gateway." />
+
+                            <TextBlock Style="{StaticResource LabelStyle}" Text="Certificate fingerprint" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" VerticalAlignment="Top" Style="{StaticResource SubtleButtonStyle}" Content="Copy"
+                                        Command="{Binding CopyCommand}" CommandParameter="{Binding Thumbprint}" />
+                                <TextBlock Style="{StaticResource CodeStyle}" FontSize="{StaticResource FontSizeSmall}" Text="{Binding Thumbprint}" />
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource HintStyle}" Text="Each workstation pins it the first time it connects. EasyVPN's Settings there should show the same." />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,22,0,6" Text="THIS GATEWAY" />
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,12">
+                        <StackPanel>
+                            <TextBlock Foreground="{DynamicResource TextMutedBrush}" Text="Checking…" Visibility="{Binding SystemChecks, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                            <ItemsControl ItemsSource="{Binding SystemChecks}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,2,0,8">
+                                            <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding Level}" />
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Subject}" FontWeight="SemiBold" />
+                                                <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
+                                                <Button Margin="0,8,0,0"
+                                                        HorizontalAlignment="Left"
+                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                        Content="{Binding FixText}"
+                                                        Command="{Binding DataContext.FixCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Visibility="{Binding FixText, Converter={StaticResource Visible}}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,22,0,6" Text="ACTIVITY" />
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock Foreground="{DynamicResource TextMutedBrush}" Text="Nothing yet." Visibility="{Binding Log, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                            <ItemsControl ItemsSource="{Binding Log}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,2">
+                                            <TextBlock DockPanel.Dock="Left"
+                                                       Width="58"
+                                                       FontSize="{StaticResource FontSizeSmall}"
+                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                       Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}" />
+                                            <TextBlock TextWrapping="Wrap" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Window>

@@ -61,11 +61,24 @@ public sealed partial class FacilityCatalog
     private readonly Lock _sync = new();
     private DateTime _loaded;
     private IReadOnlyList<Facility> _facilities = [];
+    private List<string> _problems = [];
 
     public FacilityCatalog(RecentLog log)
     {
         _log = log;
         if (!File.Exists(_path)) DataDirectory.WriteJson(_path, new FacilityFile([]));
+    }
+
+    public string FilePath => _path;
+
+    /// <summary>What is wrong with the file as last read: facilities left out, or why it could not be read.</summary>
+    public IReadOnlyList<string> Problems
+    {
+        get
+        {
+            All();
+            lock (_sync) return [.. _problems];
+        }
     }
 
     public IReadOnlyList<Facility> All()
@@ -75,6 +88,7 @@ public sealed partial class FacilityCatalog
             var stamp = File.GetLastWriteTimeUtc(_path);
             if (stamp == _loaded) return _facilities;
             _loaded = stamp;
+            _problems = [];
             try
             {
                 var file = DataDirectory.ReadJson<FacilityFile>(_path);
@@ -86,7 +100,8 @@ public sealed partial class FacilityCatalog
             }
             catch (Exception ex) when (ex is JsonException or IOException)
             {
-                _log.Add($"facilities.json could not be read, so the last good list stays: {ex.Message}");
+                _problems.Add($"facilities.json could not be read, so the last good list stays: {ex.Message}");
+                _log.Add(_problems[^1]);
             }
             return _facilities;
         }
@@ -106,8 +121,10 @@ public sealed partial class FacilityCatalog
             { Check: { } check } when !Probe.TrySplit(check, out _, out _) => $"has a check that is not host:port: {check}",
             _ => null,
         };
-        if (problem is not null) _log.Add($"Facility '{facility.Name}' ({facility.Id}) {problem}, so it is left out");
-        return problem is null;
+        if (problem is null) return true;
+        _problems.Add($"Facility '{facility.Name}' ({facility.Id}) {problem}, so it is left out");
+        _log.Add(_problems[^1]);
+        return false;
     }
 
     // The id also names the connector's work folder, so it must be a plain file name.
