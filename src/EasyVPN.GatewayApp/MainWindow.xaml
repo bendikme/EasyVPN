@@ -138,7 +138,7 @@
                             <Button Margin="8,0,0,0"
                                     Style="{StaticResource SecondaryButtonStyle}"
                                     Content="Edit facilities…"
-                                    ToolTip="Opens facilities.json in Notepad, as administrator. The gateway reads it again as soon as it is saved."
+                                    ToolTip="Opens the facility editor, as administrator. The gateway uses what is saved there straight away."
                                     Command="{Binding EditFacilitiesCommand}" />
                         </StackPanel>
                         <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="FACILITIES" />
@@ -154,7 +154,7 @@
 
                     <Border Style="{StaticResource CardBorderStyle}" Padding="16,14" Visibility="{Binding Facilities, Converter={StaticResource Visible}, ConverterParameter=invert}">
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="No facilities yet. Choose Edit facilities to add them; the README and facilities.sample.json, beside the program, show one of each kind." />
+                                   Text="No facilities yet. Choose Edit facilities to add the first one." />
                     </Border>
 
                     <Border Style="{StaticResource CardBorderStyle}" Padding="0" Visibility="{Binding Facilities, Converter={StaticResource Visible}}">
@@ -170,6 +170,14 @@
                                                     Content="Connect"
                                                     ToolTip="Connects it from here, as a workstation would: whatever is connected now is disconnected first"
                                                     Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button DockPanel.Dock="Right"
+                                                    Margin="8,0,0,0"
+                                                    VerticalAlignment="Top"
+                                                    Style="{StaticResource SubtleButtonStyle}"
+                                                    Content="Edit"
+                                                    ToolTip="Opens it in the facility editor, as administrator"
+                                                    Command="{Binding DataContext.EditFacilitiesCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding}" />
                                             <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding Level}" />
                                             <StackPanel>

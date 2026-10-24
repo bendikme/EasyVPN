@@ -36,7 +36,7 @@ public sealed class GatewayViewModel : ObservableObject
         FixCommand = new AsyncRelayCommand(p => FixAsync((CheckRow)p!));
         CopyCommand = new RelayCommand(p => Copy(p as string));
         ShowAccessKeyCommand = new RelayCommand(() => Elevated.Start(Environment.ProcessPath!, "--access-key"));
-        EditFacilitiesCommand = new RelayCommand(() => Elevated.Start("notepad.exe", $"\"{_overview?.FacilitiesFile}\""));
+        EditFacilitiesCommand = new RelayCommand(p => Elevated.Start(Environment.ProcessPath!, p is FacilityRow row ? $"--facilities {row.Id}" : "--facilities"));
         StartServiceCommand = new RelayCommand(() =>
             Elevated.Start("powershell.exe", "-NoProfile -WindowStyle Hidden -Command Start-Service EasyVPN.Gateway", hidden: true));
         UpdateCommand = new AsyncRelayCommand(() => ActAsync(CanInstallUpdate ? _gateway.InstallUpdateAsync : _gateway.CheckUpdatesAsync));
@@ -52,6 +52,8 @@ public sealed class GatewayViewModel : ObservableObject
     public AsyncRelayCommand FixCommand { get; }
     public RelayCommand CopyCommand { get; }
     public RelayCommand ShowAccessKeyCommand { get; }
+
+    /// <summary>The facility editor, as administrator; given a facility, showing that one.</summary>
     public RelayCommand EditFacilitiesCommand { get; }
     public RelayCommand StartServiceCommand { get; }
 

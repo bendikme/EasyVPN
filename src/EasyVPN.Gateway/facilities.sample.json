@@ -65,6 +65,46 @@
       "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
       "routes": [ "10.30.1.0/24", "10.30.2.0/24" ],
       "check": "10.30.1.2:102"
+    },
+    {
+      "id": "laks-sandnessjoen",
+      "name": "Sandnessjøen",
+      "customer": "Helgeland Laks",
+      "connector": "sophos",
+      "settings": { "config": "C:\\ProgramData\\EasyVPN\\Gateway\\vpn\\laks-sandnessjoen.scx", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "10.12.0.0/24" ],
+      "check": "10.12.0.10:102"
+    },
+    {
+      "id": "vest-floro",
+      "name": "Florø",
+      "customer": "Vest Fisk",
+      "connector": "netextender",
+      "settings": { "host": "vpn.vestfisk.example:4433", "domain": "LocalDomain", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "192.168.50.0/24" ],
+      "check": "192.168.50.2:102"
+    },
+    {
+      "id": "nordkapp-honningsvag",
+      "name": "Honningsvåg",
+      "customer": "Nordkapp Sjømat",
+      "connector": "pulse",
+      "settings": { "url": "https://remote.nordkapp.example", "realm": "Partners", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "10.44.8.0/24" ],
+      "check": "10.44.8.20:443"
+    },
+    {
+      "id": "fjell-molde",
+      "name": "Molde",
+      "customer": "Fjell Industri",
+      "connector": "openconnect",
+      "settings": { "protocol": "gp", "host": "gp.fjell.example", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "172.16.30.0/24" ],
+      "check": "172.16.30.5:102"
     }
   ]
 }

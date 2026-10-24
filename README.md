@@ -115,16 +115,25 @@ notification area of everyone who signs in to the gateway (and in the Start menu
   Windows VPN connection exists, …);
 - what the gateway itself lacks: the firewall rule, and for Layer 2 OpenVPN, the *EasyVPN L2*
   adapter and its bridge, each with a button that fixes it or shows where to;
-- mistakes in `facilities.json`, which *Edit facilities* opens in Notepad as administrator.
-  *Encrypt a password* makes a facility's `password`.
+- mistakes in `facilities.json`.
 
-Facilities go in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which is read again whenever it
-changes. For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
+*Edit facilities* (or *Edit* beside one) opens the **facility editor**, as administrator: add,
+duplicate and remove facilities, choose each one's VPN client from the connectors and fill in what
+that one needs, browse for its profile file (copied into `%ProgramData%\EasyVPN\Gateway\vpn`, where
+only administrators can change it) and type its password (encrypted for this machine). It marks a
+facility with a mistake in red, and the gateway uses what is saved straight away. The facilities
+are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which *Open facilities.json* in the
+editor opens in Notepad; *Encrypt a password* in the app makes a `password` for writing it by hand.
+
+For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
 desktop that can be reached with Remote Desktop: the app's *Open gateway desktop* button goes there.
 `EasyVPN.Gateway.exe info`, in an administrator console, prints the address, key and fingerprint too.
 
 The customers' VPN clients are not part of EasyVPN: install each one the way its vendor says. The
-gateway app says which facility is still missing its client.
+gateway app says which facility is still missing its client. Some customers send an installer with
+their settings built in, such as Sophos's *client and configuration* package or a preconfigured
+Ivanti, FortiClient or GlobalProtect installer: run it on the gateway once, then point the facility
+at what it installed (the profile it left, its connection's name, its server).
 
 **Each workstation.** Run `EasyVPN-Client-<version>-x64.msi`. It installs the `EasyVPN Agent`
 service and the app in `%ProgramFiles%\EasyVPN`, with a Start menu shortcut, and starts the app:
@@ -170,7 +179,8 @@ with its window open).
 
 ## Facilities
 
-`facilities.json` on the gateway; `src\EasyVPN.Gateway\facilities.sample.json` has one of each kind.
+`facilities.json` on the gateway, as the facility editor writes it; `src\EasyVPN.Gateway\facilities.sample.json`
+has one of each kind.
 
 ```json
 {
@@ -199,7 +209,7 @@ with its window open).
 | `customer` | Groups the list in the app. |
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
-| `password` | Handed to the connector as `EASYVPN_PASSWORD`. Make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`); only this gateway can decrypt it. |
+| `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
@@ -211,11 +221,19 @@ with its window open).
 
 | Connector | VPN client | Settings |
 | --- | --- | --- |
-| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, GlobalProtect, Ivanti, eWON, SINEMA RC …). EasyVPN waits for the check. | none |
+| `manual` | Any client: someone connects it on the gateway desktop (TOSIBOX Key, MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check. | none |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
-| `openvpn` | OpenVPN 2.6+ community client | `config`, `user` |
+| `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. | `config`, `user` |
 | `wireguard` | WireGuard for Windows | `config` |
 | `cisco` | Cisco Secure Client / AnyConnect, through `vpncli` | `host`, `user`, `group` |
+| `sophos` | Sophos Connect, through `sccli`: IPsec (`.scx`) and provisioning (`.pro`) files | `config`, `connection`, `user` |
+| `netextender` | SonicWall NetExtender, through `nxcli` (or `NECLI` in 10.2 and earlier) | `host`, `domain`, `user`, `trust` |
+| `pulse` | Ivanti Secure Access / Pulse Secure, through `pulselauncher`. No second sign-in, no choice of role. | `url`, `realm`, `user` |
+| `openconnect` | OpenConnect, for GlobalProtect (and Pulse, Fortinet, F5, Array, AnyConnect) servers that sign in with a user name and password | `protocol`, `host`, `user`, `group`, `servercert` |
+
+All but `manual` sign in by themselves, with the facility's `user` and `password`: a sign-in that
+asks for a token or opens a browser needs `manual`, or a service account without one from the
+customer. Each script's header says what its settings mean.
 
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a
@@ -323,7 +341,13 @@ UDP, a facility that stops answering and comes back, refusing a switch while the
 still answers, and disconnecting. Also the agent's pinning, API guards and connect flow up to routing,
 and the app against both. Creating the Wintun adapter and the routes needs the agent to run as a
 service (SYSTEM), as installed, and the vendor connectors need their VPN clients: try those on the
-real gateway, with `manual` first.
+real gateway, with `manual` first. The `sophos`, `netextender`, `pulse` and `openconnect`
+connectors follow their vendors' documented command lines but have not met a real server yet.
+
+The facility editor: reading the sample and writing it back unchanged, a new facility's id,
+validation, switching connectors, passwords, links, a file changed in Notepad meanwhile and a file
+that does not parse, all without its window. Its window loads with every binding resolved, but has
+not been looked at on a real desktop yet.
 
 For Layer 2: the gateway's Layer 2 port (the key, refusing links while no Layer 2 facility is
 connected), a Layer 2 facility failing cleanly on a gateway without the adapter, and the app showing

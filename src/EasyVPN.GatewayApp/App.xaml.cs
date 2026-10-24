@@ -5,7 +5,8 @@ namespace EasyVPN.GatewayApp;
 /// <summary>
 /// The EasyVPN Gateway app: one copy per user of the gateway's desktop, in the notification area,
 /// started at sign-in with <c>--tray</c>. Starting it again shows the running copy.
-/// <c>--access-key</c> is the app started again as administrator, to show the access key and nothing else.
+/// <c>--access-key</c> is the app started again as administrator, to show the access key and nothing else;
+/// <c>--facilities [id]</c> the same for the facility editor.
 /// </summary>
 public partial class App : Application
 {
@@ -25,6 +26,21 @@ public partial class App : Application
         {
             ShutdownMode = ShutdownMode.OnLastWindowClose;
             new AccessKeyWindow().Show();
+            return;
+        }
+
+        if (Array.IndexOf(e.Args, "--facilities") is >= 0 and var at)
+        {
+            ShutdownMode = ShutdownMode.OnLastWindowClose;
+            try
+            {
+                new FacilitiesWindow(at + 1 < e.Args.Length ? e.Args[at + 1] : null).Show();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                MessageBox.Show("It takes an administrator to change the facilities.", "EasyVPN Gateway", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Shutdown();
+            }
             return;
         }
 

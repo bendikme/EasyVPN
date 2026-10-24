@@ -1,61 +1,15 @@
 using System.Net;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace EasyVPN.Gateway;
-
-/// <summary>A facility as the gateway knows it: what clients see, plus how to connect to it.</summary>
-public sealed class Facility
-{
-    public string Id { get; set; } = "";
-    public string Name { get; set; } = "";
-    public string Customer { get; set; } = "";
-
-    /// <summary>The script in connectors\ that drives the facility's VPN client: manual, windows, openvpn, wireguard, cisco …</summary>
-    public string Connector { get; set; } = "manual";
-
-    /// <summary>Handed to the connector as <c>EASYVPN_&lt;KEY&gt;</c> environment variables.</summary>
-    public Dictionary<string, string> Settings { get; set; } = [];
-
-    /// <summary>Handed to the connector as <c>EASYVPN_PASSWORD</c>; see <see cref="Secret"/>.</summary>
-    public string? Password { get; set; }
-
-    /// <summary>The facility's networks, as CIDR. Clients route these, and only these, to the gateway.</summary>
-    public List<string> Routes { get; set; } = [];
-
-    /// <summary>
-    /// The VPN gives the gateway the facility's Ethernet (Tosibox in Layer 2 mode, say), and that
-    /// adapter is bridged with the gateway's "EasyVPN L2": workstations then get Layer 2 too,
-    /// instead of routes.
-    /// </summary>
-    public bool Layer2 { get; set; }
-
-    public DnsRule? Dns { get; set; }
-
-    /// <summary>
-    /// A <c>host:port</c> inside the facility that answers when it is reachable - a PLC's port 102,
-    /// an HMI's 443. Without one, a connector that finishes without an error is taken at its word.
-    /// </summary>
-    public string? Check { get; set; }
-
-    /// <summary>Seconds to wait for the check once the connector has run: time to sign in, for a manual one.</summary>
-    public int Timeout { get; set; } = 120;
-
-    public string? Notes { get; set; }
-    public List<FacilityLink> Links { get; set; } = [];
-
-    public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links, Layer2);
-}
 
 /// <summary>
 /// The facilities in <c>%ProgramData%\EasyVPN\Gateway\facilities.json</c>, read again whenever the
 /// file changes. A facility with a mistake in it is left out and the mistake logged; a file that
 /// does not parse at all leaves the last good list in place.
 /// </summary>
-public sealed partial class FacilityCatalog
+public sealed class FacilityCatalog
 {
-    private sealed record FacilityFile(List<Facility> Facilities);
-
     private readonly string _path = Path.Combine(GatewaySettings.Folder, "facilities.json");
     private readonly RecentLog _log;
     private readonly Lock _sync = new();
@@ -112,22 +66,9 @@ public sealed partial class FacilityCatalog
 
     private bool IsValid(Facility facility)
     {
-        var problem = facility switch
-        {
-            _ when !IdPattern().IsMatch(facility.Id) => "needs an id of letters, digits, '.', '-' and '_'",
-            { Routes.Count: 0, Layer2: false } => "has no routes",
-            _ when facility.Routes.FirstOrDefault(r => !IPNetwork.TryParse(r, out _)) is { } route =>
-                $"has a route that is not a network in CIDR form: {route}",
-            { Check: { } check } when !Probe.TrySplit(check, out _, out _) => $"has a check that is not host:port: {check}",
-            _ => null,
-        };
-        if (problem is null) return true;
+        if (facility.Problem() is not { } problem) return true;
         _problems.Add($"Facility '{facility.Name}' ({facility.Id}) {problem}, so it is left out");
         _log.Add(_problems[^1]);
         return false;
     }
-
-    // The id also names the connector's work folder, so it must be a plain file name.
-    [GeneratedRegex("^[A-Za-z0-9._-]+$")]
-    private static partial Regex IdPattern();
 }
