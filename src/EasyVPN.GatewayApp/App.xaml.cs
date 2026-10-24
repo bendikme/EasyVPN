@@ -22,6 +22,24 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // A mistake behind one click or one poll is written down, and the app stays in the
+        // notification area, rather than vanishing - unless it keeps coming back, which carrying on
+        // would only repeat.
+        var recent = new Queue<DateTime>();
+        DispatcherUnhandledException += (_, x) =>
+        {
+            recent.Enqueue(DateTime.UtcNow);
+            while (recent.Peek() < DateTime.UtcNow.AddSeconds(-30)) recent.Dequeue();
+            x.Handled = recent.Count <= 3;
+            CrashLog.Write(x.Exception, x.Handled ? "unhandled on the window's thread, carried on" : "unhandled on the window's thread again and again, the app ended");
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, x) => CrashLog.Write(x.ExceptionObject, "unhandled, the app ended");
+        TaskScheduler.UnobservedTaskException += (_, x) =>
+        {
+            CrashLog.Write(x.Exception, "unobserved in a task");
+            x.SetObserved();
+        };
+
         base.OnStartup(e);
         ThemeService.Follow();
 

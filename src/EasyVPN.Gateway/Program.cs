@@ -15,7 +15,15 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 switch (args)
 {
     case ["desktop", .. var rest]:
-        return DesktopSession.RunApp([.. rest], TimeSpan.FromSeconds(100));
+        try
+        {
+            return DesktopSession.RunApp([.. rest], TimeSpan.FromSeconds(100));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"The EasyVPN Gateway app could not be started on the desktop: {ex.Message}");
+            return 1;
+        }
     case ["info"]:
         PrintInfo();
         return 0;

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace EasyVPN.GatewayApp;
 
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
 
     // The activity log keeps its newest line in view, unless someone has scrolled up to read.
     private bool _following = true;
+    private bool _scrollPending;
 
     public MainWindow(GatewayViewModel model)
     {
@@ -24,9 +26,17 @@ public partial class MainWindow : Window
         model.PropertyChanged += (_, _) =>
             ServiceDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, model.ServiceOnline ? "SuccessBrush" : "DangerBrush");
 
+        // Scrolled once the list has taken the new lines in, and once for all of them: scrolling from
+        // inside the change itself makes the list measure itself before it has heard of the line.
         model.Activity.CollectionChanged += (_, e) =>
         {
-            if (e.Action == NotifyCollectionChangedAction.Add && _following) ActivityList.ScrollIntoView(model.Activity[^1]);
+            if (e.Action != NotifyCollectionChangedAction.Add || !_following || _scrollPending) return;
+            _scrollPending = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                _scrollPending = false;
+                if (model.Activity.Count > 0) ActivityList.ScrollIntoView(model.Activity[^1]);
+            });
         };
         ActivityList.Loaded += (_, _) =>
         {

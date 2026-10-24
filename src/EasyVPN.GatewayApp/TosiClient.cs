@@ -50,6 +50,13 @@ public static partial class TosiClient
             say($"Tosi Client could not be driven: {ex.Message}");
             return 1;
         }
+        catch (Exception ex)
+        {
+            // Anything else is a mistake here: said, and written down whole, but never a crash.
+            CrashLog.Write(ex, "driving Tosi Client");
+            say($"Tosi Client could not be driven ({ex.GetType().Name}: {ex.Message}). The details are in {CrashLog.Path} on the gateway.");
+            return 1;
+        }
     }
 
     private static int Usage(Action<string> say)
