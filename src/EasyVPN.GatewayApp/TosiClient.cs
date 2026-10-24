@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Automation;
+using Microsoft.Win32;
 
 namespace EasyVPN.GatewayApp;
 
@@ -14,9 +16,13 @@ namespace EasyVPN.GatewayApp;
 /// and wait until the client shows it so. Through UI Automation where the client offers it, and
 /// with the mouse and keyboard where it does not - which needs the session's screen unlocked.
 ///
-///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]"      the password in EASYVPN_PASSWORD
+///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]" [--start]   the password in EASYVPN_PASSWORD
 ///   EasyVPN.GatewayApp.exe --tosibox disconnect "Tosibox 15 [Plant]"
 ///   EasyVPN.GatewayApp.exe --tosibox dump > tosi.txt                     what it sees of the client
+///
+/// With --start, a client that shows no window here is started: from EASYVPN_PROGRAM, or as the
+/// installed programs list it. Started again, a running one that sits in the notification area
+/// shows itself.
 /// </summary>
 public static partial class TosiClient
 {
@@ -33,8 +39,8 @@ public static partial class TosiClient
         {
             return args switch
             {
-                ["connect", var name] => Switch(name.Trim(), connect: true, password, say),
-                ["disconnect", var name] => Switch(name.Trim(), connect: false, password, say),
+                ["connect", var name, .. var options] => Switch(name.Trim(), connect: true, password, options.Contains("--start"), say),
+                ["disconnect", var name] => Switch(name.Trim(), connect: false, password, start: false, say),
                 ["dump"] => Dump(say),
                 _ => Usage(say),
             };
@@ -48,14 +54,16 @@ public static partial class TosiClient
 
     private static int Usage(Action<string> say)
     {
-        say("--tosibox connect <Lock> | disconnect <Lock> | dump");
+        say("--tosibox connect <Lock> [--start] | disconnect <Lock> | dump");
         return 1;
     }
 
     // ---------------------------------------------------------------- connect, disconnect
 
-    private static int Switch(string name, bool connect, string? password, Action<string> say)
+    private static int Switch(string name, bool connect, string? password, bool start, Action<string> say)
     {
+        var showing = FindWindow(MainTitle()) != IntPtr.Zero || FindWindow(PasswordTitle()) != IntPtr.Zero;
+        if (!showing && start && !Start(say)) return 1;
         if (!SignIn(password, say, out var code)) return code;
 
         var handle = FindWindow(MainTitle());
@@ -113,6 +121,55 @@ public static partial class TosiClient
             if (search is not null) TryEnter(search, "");
         }
     }
+
+    /// <summary>Starts the client, or brings a running one out of the notification area, and waits for its window.</summary>
+    private static bool Start(Action<string> say)
+    {
+        var program = Program();
+        if (program is null)
+        {
+            say("Tosi Client is not running, and is not among the installed programs: give the facility its program (the client's .exe).");
+            return false;
+        }
+        say($"Starting Tosi Client ({program}).");
+        Process.Start(new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(program) })?.Dispose();
+        if (!WaitUntil(() => FindWindow(MainTitle()) != IntPtr.Zero || FindWindow(PasswordTitle()) != IntPtr.Zero, TimeSpan.FromSeconds(45)))
+        {
+            say("Tosi Client was started, but showed no window within 45 s.");
+            return false;
+        }
+        Thread.Sleep(1500); // Its list fills in a moment later.
+        return true;
+    }
+
+    /// <summary>The client's program: the one set, or the installed one, as Windows' list of programs has it.</summary>
+    private static string? Program()
+    {
+        if (Environment.GetEnvironmentVariable("EASYVPN_PROGRAM") is { Length: > 0 } set) return File.Exists(set) ? set : null;
+
+        foreach (var (hive, view) in new[] { (RegistryHive.LocalMachine, RegistryView.Registry64), (RegistryHive.LocalMachine, RegistryView.Registry32), (RegistryHive.CurrentUser, RegistryView.Default) })
+        {
+            using var root = RegistryKey.OpenBaseKey(hive, view);
+            using var programs = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
+            foreach (var key in programs?.GetSubKeyNames() ?? [])
+            {
+                using var entry = programs!.OpenSubKey(key);
+                if (entry?.GetValue("DisplayName") is not string name || !Product().IsMatch(name)) continue;
+                if (entry.GetValue("DisplayIcon") is string icon && Client(icon.Split(',')[0].Trim().Trim('"')) is { } fromIcon) return fromIcon;
+                if (entry.GetValue("InstallLocation") is not string folder || !Directory.Exists(folder)) continue;
+                // Its folder may hold other programs too (OpenVPN, for one): the one named for the client, or the only one.
+                var found = Directory.EnumerateFiles(folder, "*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 1 })
+                    .Select(Client).OfType<string>().ToList();
+                if ((found.FirstOrDefault(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p))) ?? (found.Count == 1 ? found[0] : null)) is { } inFolder)
+                    return inFolder;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The path, when it is the client itself rather than its uninstaller, updater or service.</summary>
+    private static string? Client(string path) =>
+        path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path) && !NotTheClient().IsMatch(Path.GetFileName(path)) ? path : null;
 
     /// <summary>The client's password, when it asks for it - when it has just started.</summary>
     private static bool SignIn(string? password, Action<string> say, out int code)
@@ -318,6 +375,15 @@ public static partial class TosiClient
 
     [GeneratedRegex(@"^(Dis)?connect$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectButton();
+
+    [GeneratedRegex(@"\b(Tosi|TOSIBOX)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Product();
+
+    [GeneratedRegex(@"unins|uninstall|update|service|helper|crash|driver|tapctl|devcon|setup|openvpn|redist", RegexOptions.IgnoreCase)]
+    private static partial Regex NotTheClient();
+
+    [GeneratedRegex(@"tosi|key|client", RegexOptions.IgnoreCase)]
+    private static partial Regex ClientName();
 
     [GeneratedRegex(@"\bconnected\b", RegexOptions.IgnoreCase)]
     private static partial Regex Connected();

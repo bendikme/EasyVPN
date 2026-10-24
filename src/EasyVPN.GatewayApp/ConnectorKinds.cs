@@ -53,10 +53,11 @@ public static class ConnectorKinds
                     FieldKind.Flag),
             ]),
         new("tosibox", "Tosibox",
-            "Tosi Client (once TOSIBOX Key) on this gateway's desktop, driven by the EasyVPN Gateway app there: it enters the client's password if asked, finds the Lock, presses Connect or Disconnect, and waits until the client shows it. The client must be running in a signed-in desktop session on the gateway.",
+            "Tosi Client (once TOSIBOX Key) on this gateway's desktop, driven by the EasyVPN Gateway app there: it starts the client if need be, enters its password if asked, finds the Lock, presses Connect or Disconnect, and waits until the client shows it. Someone must be signed in to the gateway's desktop.",
             true,
             [
                 new("lock", "Lock", "Its name exactly as Tosi Client lists it, such as Tosibox 15 [Matbørsen]. The password below is Tosi Client's own.", Required: true),
+                new("program", "Tosi Client's program", "Its .exe, only when EasyVPN does not find it among the installed programs by itself."),
             ]),
         new("sophos", "Sophos Connect",
             "Sophos Connect, through its command line sccli: for IPsec (.scx) and provisioning (.pro) files, which only it takes.",

@@ -11,7 +11,8 @@ namespace EasyVPN.Gateway;
 /// driving a VPN client's window. The service runs as SYSTEM, which may start a process as the user
 /// of any session; its connectors reach this as <c>EasyVPN.Gateway.exe desktop &lt;app arguments&gt;</c>.
 /// Sessions are tried console first, and an app that found nothing to drive in one (exit code
-/// <see cref="NotHere"/>) is tried in the next. What it prints comes back, and its exit code.
+/// <see cref="NotHere"/>) is tried in the next; when none had it, so does this. What it prints
+/// comes back, and its exit code.
 /// The facility's EASYVPN_ settings, the password among them, go to it in its environment.
 /// </summary>
 public static class DesktopSession
@@ -41,15 +42,29 @@ public static class DesktopSession
             }
             tried = true;
             int code;
-            using (var handle = new SafeAccessTokenHandle(token))
-                code = RunAs(handle, app, args, timeout);
+            using (var user = new SafeAccessTokenHandle(token))
+            using (var full = Elevated(user))
+                code = RunAs(full.IsInvalid ? user : full, app, args, timeout);
             if (code != NotHere) return code;
         }
 
-        Console.WriteLine(tried
-            ? "None of the desktops signed in to this gateway has it."
-            : "Nobody is signed in to this gateway's desktop. Sign in there (or set the gateway to sign in by itself) and start the VPN client.");
+        if (tried) return NotHere;
+        Console.WriteLine("Nobody is signed in to this gateway's desktop. Set the gateway to sign in by itself, or sign in there.");
         return 1;
+    }
+
+    /// <summary>
+    /// An administrator's session runs with the limited half of a pair of tokens; SYSTEM may have the
+    /// full one. The app runs with it, so it can reach a VPN client that runs as administrator, and
+    /// start one as such without Windows asking first.
+    /// </summary>
+    private static SafeAccessTokenHandle Elevated(SafeAccessTokenHandle token)
+    {
+        const int tokenElevationType = 18, tokenLinkedToken = 19, limited = 3;
+        if (GetTokenInformation(token, tokenElevationType, out int type, sizeof(int), out _) && type == limited
+            && GetTokenInformation(token, tokenLinkedToken, out IntPtr linked, IntPtr.Size, out _))
+            return new SafeAccessTokenHandle(linked);
+        return SafeAccessTokenHandle.InvalidHandle;
     }
 
     /// <summary>The console's session first, then the others with someone signed in, connected or not.</summary>
@@ -255,6 +270,12 @@ public static class DesktopSession
 
     [DllImport("wtsapi32.dll", SetLastError = true)]
     private static extern bool WTSQueryUserToken(uint session, out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int infoClass, out int info, int length, out int returned);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int infoClass, out IntPtr info, int length, out int returned);
 
     [DllImport("userenv.dll", SetLastError = true)]
     private static extern bool CreateEnvironmentBlock(out IntPtr environment, SafeAccessTokenHandle token, bool inherit);
