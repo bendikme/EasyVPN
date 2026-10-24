@@ -52,6 +52,12 @@ public static class ConnectorKinds
                 new("legacy", "Allow old certificates", "Signed with SHA1, or with RSA keys under 2048 bits: OpenVPN 2.6 refuses them otherwise. Ticked by itself for a profile that has them; better still, the customer makes new ones.",
                     FieldKind.Flag),
             ]),
+        new("tosibox", "Tosibox",
+            "Tosi Client (once TOSIBOX Key) on this gateway's desktop, driven by the EasyVPN Gateway app there: it enters the client's password if asked, finds the Lock, presses Connect or Disconnect, and waits until the client shows it. The client must be running in a signed-in desktop session on the gateway.",
+            true,
+            [
+                new("lock", "Lock", "Its name exactly as Tosi Client lists it, such as Tosibox 15 [Matbørsen]. The password below is Tosi Client's own.", Required: true),
+            ]),
         new("sophos", "Sophos Connect",
             "Sophos Connect, through its command line sccli: for IPsec (.scx) and provisioning (.pro) files, which only it takes.",
             true,
@@ -113,7 +119,7 @@ public static class ConnectorKinds
                     FieldKind.File, Required: true, Filter: "WireGuard tunnels (*.conf)|*.conf|All files (*.*)|*.*"),
             ]),
         new("manual", "By hand",
-            "Someone connects it in its own client on this gateway's desktop: TOSIBOX Key, a sign-in with a token or in a browser, any client without a command line. EasyVPN waits for the check, for up to the timeout.",
+            "Someone connects it in its own client on this gateway's desktop: a sign-in with a token or in a browser, any client without a command line. EasyVPN waits for the check (or for the networks its VPN sets up, when Routes is empty), for up to the timeout.",
             false,
             []),
     ];

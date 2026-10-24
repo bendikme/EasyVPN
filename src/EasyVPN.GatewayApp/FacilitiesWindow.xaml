@@ -267,7 +267,7 @@
 
                             <TextBlock Style="{StaticResource LabelStyle}" Text="Check" />
                             <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding Check, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="host:port inside the facility that answers once it is connected: a PLC's 102, an HMI's 443. Without one, the gateway takes the VPN client at its word." />
+                            <TextBlock Style="{StaticResource HintStyle}" Text="Optional. host:port inside the facility that answers once it is connected, such as a PLC's 102 or an HMI's 443: connected then means the plant answers too, and a dropped plant is noticed. Without one, connected is when the VPN client says so." />
 
                             <TextBlock Style="{StaticResource LabelStyle}" Text="Timeout, in seconds" />
                             <TextBox Width="120" HorizontalAlignment="Left" Style="{StaticResource FieldStyle}" Text="{Binding Timeout, UpdateSourceTrigger=PropertyChanged}" />

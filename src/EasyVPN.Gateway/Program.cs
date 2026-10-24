@@ -10,8 +10,12 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // EasyVPN.Gateway.exe           runs the gateway: as the Windows service, or in a console to try it out
 // EasyVPN.Gateway.exe info      prints what a client needs to connect
 // EasyVPN.Gateway.exe protect   encrypts a VPN password for facilities.json
+// EasyVPN.Gateway.exe desktop … runs the gateway app with those arguments in a signed-in desktop
+//                               session, for a connector that drives a VPN client's window
 switch (args)
 {
+    case ["desktop", .. var rest]:
+        return DesktopSession.RunApp([.. rest], TimeSpan.FromSeconds(100));
     case ["info"]:
         PrintInfo();
         return 0;

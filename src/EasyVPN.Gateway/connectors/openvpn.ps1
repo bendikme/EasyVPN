@@ -7,6 +7,7 @@
                legacy   "true" allows old certificates, signed with SHA1 or with RSA keys under
                         2048 bits, which OpenVPN 2.6 refuses otherwise (--tls-cert-profile insecure)
 
+    Connect returns once OpenVPN logs "Initialization Sequence Completed".
     Check: OpenVPN installed, and the profile there.
 #>
 param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
@@ -55,3 +56,24 @@ if ($env:EASYVPN_USER) {
 }
 $process = Start-Process $openvpn -ArgumentList $arguments -WindowStyle Hidden -PassThru
 Write-Output "OpenVPN started (process $($process.Id)), logging to $logFile"
+
+# Connected is when OpenVPN says so; a refused sign-in, or OpenVPN ending, is a failure now.
+$deadline = (Get-Date).AddSeconds(100)
+while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $log = Get-Content $logFile -ErrorAction SilentlyContinue
+    if ($log -match 'Initialization Sequence Completed') {
+        Write-Output 'OpenVPN is connected.'
+        exit 0
+    }
+    $refused = $log -match 'AUTH_FAILED'
+    if ($refused -or $process.HasExited) {
+        $log | Select-Object -Last 12 | Write-Output
+        Stop-OpenVpn
+        if ($refused) { throw 'The server refused the user name or password.' }
+        throw 'OpenVPN stopped.'
+    }
+}
+$log | Select-Object -Last 12 | Write-Output
+Stop-OpenVpn
+throw 'OpenVPN did not connect within 100 s.'

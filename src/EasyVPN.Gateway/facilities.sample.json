@@ -30,11 +30,11 @@
       "id": "aqua-hitra",
       "name": "Hitra hatchery",
       "customer": "Aqua Nord",
-      "connector": "manual",
+      "connector": "tosibox",
+      "settings": { "lock": "Tosibox 7 [Hitra]" },
+      "password": "dpapi:(Tosi Client's password: run EasyVPN.Gateway.exe protect and paste the result here)",
       "layer2": true,
-      "check": "192.168.20.10:102",
-      "timeout": 180,
-      "notes": "Tosibox Lock in Layer 2 mode: connect it in TOSIBOX Key on the gateway desktop. On this PC the plant's LAN is the EasyVPN L2 adapter: choose it in TIA Portal to find devices."
+      "notes": "Tosibox Lock in Layer 2 mode. On this PC the plant's LAN is the EasyVPN L2 adapter: choose it in TIA Portal to find devices."
     },
     {
       "id": "nordic-bergen",

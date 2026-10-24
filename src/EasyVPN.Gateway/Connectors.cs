@@ -55,6 +55,8 @@ public sealed class Connectors(RecentLog log)
         {
             ["EASYVPN_FACILITY"] = facility.Id,
             ["EASYVPN_WORK"] = work,
+            // For a connector that needs it: EasyVPN.Gateway.exe desktop … (see DesktopSession).
+            ["EASYVPN_GATEWAY"] = Environment.ProcessPath ?? "",
         };
         foreach (var (key, value) in facility.Settings)
             environment[$"EASYVPN_{key.ToUpperInvariant()}"] = value;

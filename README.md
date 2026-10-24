@@ -26,8 +26,9 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
 
 - **The gateway connects one facility at a time**, shared by every workstation. Connecting takes
   down whatever was up, runs the facility's *connector* (a small PowerShell script that drives one
-  kind of VPN client), and waits until the facility's *check* address (a PLC's port 102, an HMI's
-  443) answers. Only then does it open its relay, and only to that facility's networks: its
+  kind of VPN client) until the client says it is connected, and, for a facility with a *check*
+  address (a PLC's port 102, an HMI's 443), until that answers too. Only then does it open its
+  relay, and only to that facility's networks: its
   `routes`, or for a facility without any, the networks its VPN set up on the gateway while
   connecting (most VPN servers push them then, rather than writing them into the profile).
 - **The workstation's adapter stays put.** The agent keeps gost running in tungo mode: a Wintun
@@ -35,9 +36,10 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   connections itself, so through whichever VPN is up. Switching facilities changes only which
   networks are routed to the adapter, and which DNS names go to the facility's DNS servers (via the
   Name Resolution Policy Table, so the PC's own DNS is untouched).
-- **Connected means verified.** The gateway calls a facility connected when its check answers from
-  the gateway; the agent when a connection from the workstation reaches it through the tunnel.
-- **It fails closed.** If the facility stops answering, the gateway closes the relay until it
+- **Connected means verified.** The gateway calls a facility connected when its VPN client says so
+  and its check, if it has one, answers from the gateway; the agent when a connection from the
+  workstation reaches the gateway's relay, and the check through the tunnel.
+- **It fails closed.** If a facility with a check stops answering, the gateway closes the relay until it
   answers again, so traffic stops rather than going some other way. The workstation keeps its
   routes until you disconnect. Connecting another facility is refused while the previous one still
   answers, because two customers often use the same addresses (`192.168.0.10` at both) and a VPN
@@ -219,15 +221,16 @@ has one of each kind.
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
-| `check` | `host:port` inside the facility that answers when it is reachable. Strongly recommended: without it a connector that runs without error is taken at its word, and switching cannot confirm the previous facility is really down. |
-| `timeout` | Seconds to wait for the check after the connector has run (default 120); allow time to sign in for `manual`. |
+| `check` | Optional. `host:port` inside the facility that answers when it is reachable. With one, connected also means the plant answers, a plant that stops answering is noticed (and its traffic blocked), and switching confirms the previous facility is really down. Without one, connected is when the connector says its VPN client is connected. |
+| `timeout` | Seconds to wait for the check, or the networks the VPN sets up, after the connector has run (default 120); allow time to sign in for `manual`. |
 | `links` | Buttons in the app: `https://…` opens the browser, `rdp://host` opens Remote Desktop. |
 
 ## Connectors
 
 | Connector | VPN client | Settings |
 | --- | --- | --- |
-| `manual` | Any client: someone connects it on the gateway desktop (TOSIBOX Key, MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check. | none |
+| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
+| `tosibox` | Tosi Client (once TOSIBOX Key), which has no command line: the EasyVPN Gateway app, started by the gateway in the desktop session where the client runs, enters the client's password if it asks, searches for the Lock, presses Connect or Disconnect and waits until the client shows it. The facility's `password` is Tosi Client's. | `lock` |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
 | `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. `legacy`: `true` allows certificates signed with SHA1 or with short RSA keys (`--tls-cert-profile insecure`), which OpenVPN 2.6 refuses otherwise. | `config`, `user`, `legacy` |
 | `wireguard` | WireGuard for Windows | `config` |
@@ -239,7 +242,18 @@ has one of each kind.
 
 All but `manual` sign in by themselves, with the facility's `user` and `password`: a sign-in that
 asks for a token or opens a browser needs `manual`, or a service account without one from the
-customer. Each script's header says what its settings mean.
+customer. Each script's header says what its settings mean. Each returns once its client says it is
+connected (OpenVPN's "Initialization Sequence Completed", Cisco's "state: Connected", Tosi Client's
+Disconnect button), so a facility needs no `check` to turn green.
+
+**Tosibox.** Tosi Client must be running in a signed-in desktop session on the gateway: set the
+gateway to sign in by itself, and the client to start with Windows. The app drives it through UI
+Automation where the client allows, and otherwise with the mouse and keyboard, which needs that
+session's screen on and unlocked (not a disconnected Remote Desktop session). Give each facility the
+Lock's name exactly as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes`
+empty unless the Lock is in Layer 2 mode. Should one not connect, run
+`"C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt` on the
+gateway's desktop: it writes what the app sees of the client.
 
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a
