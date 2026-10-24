@@ -109,7 +109,35 @@ public sealed class GatewayViewModel : ObservableObject
     public string? AskedBy => _serviceOnline && State != ConnectionState.Disconnected && _overview?.Status.Client is { } client ? $"Asked by {client}" : null;
 
     /// <summary>What the gateway did lately, newest first.</summary>
-    public IReadOnlyList<LogLine> Log => [.. (_overview?.Status.Log ?? []).Reverse().Take(40)];
+    // ---------------------------------------------------------------- activity
+
+    /// <summary>
+    /// What the gateway did, oldest first. The service keeps only its last lines; the app keeps
+    /// every line it has seen since it started, up to <see cref="ActivityLimit"/>.
+    /// </summary>
+    public ObservableCollection<LogLine> Activity { get; } = [];
+
+    private const int ActivityLimit = 1000;
+
+    public string ActivityText => Activity.Count switch
+    {
+        0 => "",
+        1 => "1 line",
+        var n => $"{n} lines",
+    };
+
+    /// <summary>Adds what is new in the service's latest lines.</summary>
+    private void Collect(IReadOnlyList<LogLine> lines)
+    {
+        var last = Activity.LastOrDefault();
+        foreach (var line in lines)
+        {
+            // Lines come in order; one stamped with the time of the last one seen may still be new.
+            if (last is not null && (line.Time < last.Time || (line.Time == last.Time && Activity.Contains(line)))) continue;
+            Activity.Add(line);
+        }
+        while (Activity.Count > ActivityLimit) Activity.RemoveAt(0);
+    }
 
     // ---------------------------------------------------------------- for workstations
 
@@ -211,6 +239,7 @@ public sealed class GatewayViewModel : ObservableObject
                 if (!ex.ServiceDown) Error = ex.Message;
             }
             var changed = Refresh();
+            Collect(_overview?.Status.Log ?? []);
             OnPropertyChanged(string.Empty);
 
             if (_overview?.Update?.State == UpdateState.Installing && !_updating)

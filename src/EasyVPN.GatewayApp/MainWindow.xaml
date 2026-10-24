@@ -14,6 +14,7 @@
 
     <Window.Resources>
         <app:VisibilityConverter x:Key="Visible" />
+        <GridLength x:Key="LogTimeWidth">74</GridLength>
 
         <!-- Whether something is ready, as a coloured dot. Put the CheckLevel in Tag. -->
         <Style x:Key="CheckDotStyle" TargetType="Ellipse">
@@ -57,6 +58,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Header: what this is, and whether the service behind it runs. -->
@@ -267,29 +269,76 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
-
-                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,22,0,6" Text="ACTIVITY" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="14,10">
-                        <StackPanel>
-                            <TextBlock Foreground="{DynamicResource TextMutedBrush}" Text="Nothing yet." Visibility="{Binding Log, Converter={StaticResource Visible}, ConverterParameter=invert}" />
-                            <ItemsControl ItemsSource="{Binding Log}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <DockPanel Margin="0,2">
-                                            <TextBlock DockPanel.Dock="Left"
-                                                       Width="58"
-                                                       FontSize="{StaticResource FontSizeSmall}"
-                                                       Foreground="{DynamicResource TextMutedBrush}"
-                                                       Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}" />
-                                            <TextBlock TextWrapping="Wrap" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
-                                        </DockPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
                 </StackPanel>
             </Grid>
         </ScrollViewer>
+
+        <!-- ============================================================ activity: a log, oldest first, kept to its own height -->
+        <Border Grid.Row="2"
+                Height="230"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrushSoft}"
+                BorderThickness="0,1,0,0">
+            <DockPanel Margin="24,10,24,12">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding ActivityText}" />
+                        <Button Style="{StaticResource SubtleButtonStyle}" Content="Copy" ToolTip="Copies the lines selected, or all of them" Click="OnCopyActivityClick" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="ACTIVITY" />
+                </DockPanel>
+
+                <Border BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="1" CornerRadius="{StaticResource RadiusMedium}" Background="{DynamicResource BackgroundBrush}">
+                    <DockPanel>
+                        <!-- Column headings, lined up with the rows below. -->
+                        <Border DockPanel.Dock="Top" Padding="10,5" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
+                            <Grid TextElement.Foreground="{DynamicResource TextMutedBrush}" TextElement.FontSize="{StaticResource FontSizeSmall}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{StaticResource LogTimeWidth}" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock FontWeight="SemiBold" Text="Time" />
+                                <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Event" />
+                            </Grid>
+                        </Border>
+                        <Grid>
+                            <TextBlock Margin="10,8" Foreground="{DynamicResource TextMutedBrush}" FontSize="{StaticResource FontSizeSmall}" Text="Nothing yet."
+                                       Visibility="{Binding Activity, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                            <ListBox x:Name="ActivityList"
+                                     Style="{StaticResource AppListBoxStyle}"
+                                     ItemsSource="{Binding Activity}"
+                                     SelectionMode="Extended"
+                                     FontFamily="Consolas"
+                                     FontSize="{StaticResource FontSizeSmall}">
+                                <ListBox.CommandBindings>
+                                    <CommandBinding Command="ApplicationCommands.Copy" Executed="OnCopyActivity" />
+                                </ListBox.CommandBindings>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="Padding" Value="8,2" />
+                                        <Setter Property="VerticalContentAlignment" Value="Top" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="{StaticResource LogTimeWidth}" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Foreground="{DynamicResource TextMutedBrush}"
+                                                       Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}"
+                                                       ToolTip="{Binding Time.LocalDateTime, StringFormat=dddd d MMMM yyyy HH:mm:ss}" />
+                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </DockPanel>
+                </Border>
+            </DockPanel>
+        </Border>
     </Grid>
 </Window>
