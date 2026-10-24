@@ -65,6 +65,11 @@
         <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
             <DockPanel Margin="24,14">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Margin="0,0,12,0"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="Settings…"
+                            ToolTip="What the facilities of a kind share, such as Tosi Client's program and password. Asks for administrator rights."
+                            Command="{Binding SettingsCommand}" />
                     <Border Style="{StaticResource StatusPillStyle}" Margin="0,0,8,0" Visibility="{Binding ProblemText, Converter={StaticResource Visible}}">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource WarningBrush}" />

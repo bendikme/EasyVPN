@@ -7,13 +7,19 @@ public enum FieldKind
     Text,
     /// <summary>A file, chosen with Browse and copied into the gateway's own folder.</summary>
     File,
+    /// <summary>A program installed on the gateway, chosen with Browse and left where it is.</summary>
+    Program,
     /// <summary>A check box: "true", or left out.</summary>
     Flag,
     /// <summary>One of <see cref="ConnectorField.Choices"/>.</summary>
     Choice,
 }
 
-/// <summary>One of a connector's settings, as the facility editor asks for it. It reaches the connector as <c>EASYVPN_&lt;KEY&gt;</c>.</summary>
+/// <summary>
+/// One of a connector's settings, as the facility editor asks for it. It reaches the connector as
+/// <c>EASYVPN_&lt;KEY&gt;</c>. A <see cref="Shared"/> one can also be set once for all the
+/// connector's facilities, in the gateway app's Settings.
+/// </summary>
 public sealed record ConnectorField(
     string Key,
     string Label,
@@ -21,7 +27,9 @@ public sealed record ConnectorField(
     FieldKind Kind = FieldKind.Text,
     bool Required = false,
     string? Filter = null,
-    IReadOnlyList<string>? Choices = null);
+    IReadOnlyList<string>? Choices = null,
+    bool Shared = false,
+    string? SharedHint = null);
 
 /// <summary>
 /// A kind of VPN client the editor can set a facility up for: one script in connectors\. The
@@ -31,6 +39,12 @@ public sealed record ConnectorField(
 public sealed record ConnectorKind(string Name, string Title, string Description, bool UsesPassword, IReadOnlyList<ConnectorField> Fields)
 {
     public bool IsCustom { get; private init; }
+
+    /// <summary>Its password can be set once for all its facilities, in Settings: one client's own, rather than each server's.</summary>
+    public bool SharesPassword { get; init; }
+
+    /// <summary>Anything to set in Settings.</summary>
+    public bool HasShared => SharesPassword || Fields.Any(f => f.Shared);
 
     public static ConnectorKind Custom(string name) =>
         new(name, name, "A connector of this gateway's own: its settings are whatever its script reads.", true, []) { IsCustom = true };
@@ -56,9 +70,11 @@ public static class ConnectorKinds
             "Tosi Client (once TOSIBOX Key) on this gateway's desktop, driven by the EasyVPN Gateway app there: it starts the client if need be, enters its password if asked, finds the Lock, presses Connect or Disconnect, and waits until the client shows it. Someone must be signed in to the gateway's desktop.",
             true,
             [
-                new("lock", "Lock", "Its name exactly as Tosi Client lists it, such as Tosibox 15 [Matbørsen]. The password below is Tosi Client's own.", Required: true),
-                new("program", "Tosi Client's program", "Its .exe, only when EasyVPN does not find it among the installed programs by itself."),
-            ]),
+                new("lock", "Lock", "Its name exactly as Tosi Client lists it, such as Tosibox 15 [Matbørsen].", Required: true),
+                new("program", "Tosi Client's program", "TosiboxKey.exe, which starts the client. Set once for every Tosibox facility in Settings; one here is for this facility alone.",
+                    FieldKind.Program, Filter: "Programs (*.exe)|*.exe", Shared: true,
+                    SharedHint: "TosiboxKey.exe, which starts Tosi Client when it is not running. Empty: EasyVPN looks for it among the installed programs."),
+            ]) { SharesPassword = true },
         new("sophos", "Sophos Connect",
             "Sophos Connect, through its command line sccli: for IPsec (.scx) and provisioning (.pro) files, which only it takes.",
             true,

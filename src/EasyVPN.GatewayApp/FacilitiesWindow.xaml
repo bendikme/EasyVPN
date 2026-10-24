@@ -211,7 +211,7 @@
                                                         Content="Browse…"
                                                         Command="{Binding DataContext.BrowseCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         CommandParameter="{Binding}"
-                                                        Visibility="{Binding IsFile, Converter={StaticResource Visible}}" />
+                                                        Visibility="{Binding CanBrowse, Converter={StaticResource Visible}}" />
                                                 <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
                                             </DockPanel>
                                             <CheckBox Margin="0,14,0,0"

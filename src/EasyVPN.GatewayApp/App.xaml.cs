@@ -8,7 +8,7 @@ namespace EasyVPN.GatewayApp;
 /// The EasyVPN Gateway app: one copy per user of the gateway's desktop, in the notification area,
 /// started at sign-in with <c>--tray</c>. Starting it again shows the running copy.
 /// <c>--access-key</c> is the app started again as administrator, to show the access key and nothing else;
-/// <c>--facilities [id]</c> the same for the facility editor. <c>--tosibox …</c> drives Tosi Client
+/// <c>--facilities [id]</c> the same for the facility editor, <c>--settings</c> for Settings. <c>--tosibox …</c> drives Tosi Client
 /// for the gateway's tosibox connector (<see cref="TosiClient"/>), with no window of its own.
 /// </summary>
 public partial class App : Application
@@ -55,6 +55,21 @@ public partial class App : Application
         {
             using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
             Shutdown(TosiClient.Run(tosibox, output.WriteLine));
+            return;
+        }
+
+        if (e.Args.Contains("--settings"))
+        {
+            ShutdownMode = ShutdownMode.OnLastWindowClose;
+            try
+            {
+                new SettingsWindow().Show();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                MessageBox.Show("It takes an administrator to change the settings.", "EasyVPN Gateway", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Shutdown();
+            }
             return;
         }
 

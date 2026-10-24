@@ -55,6 +55,9 @@ public sealed class GatewayViewModel : ObservableObject
 
     /// <summary>The facility editor, as administrator; given a facility, showing that one.</summary>
     public RelayCommand EditFacilitiesCommand { get; }
+
+    /// <summary>Settings, as administrator: what the facilities of a kind share.</summary>
+    public RelayCommand SettingsCommand { get; } = new(() => Elevated.Start(Environment.ProcessPath!, "--settings"));
     public RelayCommand StartServiceCommand { get; }
 
     /// <summary>Installs the newer version found, or else looks for one.</summary>

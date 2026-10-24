@@ -341,6 +341,14 @@ public sealed class FacilitiesViewModel : ObservableObject
         var dialog = new OpenFileDialog { Filter = row.Field.Filter ?? "All files (*.*)|*.*", CheckFileExists = true };
         if (dialog.ShowDialog() != true) return;
 
+        // A program installed here is pointed at where it is.
+        if (row.Field.Kind == FieldKind.Program)
+        {
+            row.Value = dialog.FileName;
+            return;
+        }
+
+        var draft = (FacilityDraft)row.Owner;
         var source = dialog.FileName;
         var folder = Directory.CreateDirectory(Path.Combine(_folder, "vpn")).FullName;
         var target = source;
@@ -350,14 +358,14 @@ public sealed class FacilitiesViewModel : ObservableObject
             if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(source)), folder, StringComparison.OrdinalIgnoreCase))
             {
                 // Named after the facility, when its id will do for a file name.
-                var id = row.Owner.Id.Trim();
+                var id = draft.Id.Trim();
                 var name = new Facility { Id = id, Layer2 = true }.Problem() is null ? id : Path.GetFileNameWithoutExtension(source);
                 target = Path.Combine(folder, name + Path.GetExtension(source));
                 File.Copy(source, target, overwrite: true);
                 said.Add($"{Path.GetFileName(source)} copied to {target}.");
             }
             row.Value = target;
-            if (row.Owner.Kind.Name == "openvpn") said.AddRange(TakeIn(row.Owner, target));
+            if (draft.Kind.Name == "openvpn") said.AddRange(TakeIn(draft, target));
             Status = string.Join(" ", said);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -389,7 +397,7 @@ public sealed class FacilitiesViewModel : ObservableObject
 }
 
 /// <summary>One facility as the editor holds it: the form's fields, turned back into a <see cref="Facility"/> to save.</summary>
-public sealed class FacilityDraft : ObservableObject
+public sealed class FacilityDraft : ObservableObject, ISettingsOwner
 {
     private string _id;
     private string _name;
@@ -538,6 +546,7 @@ public sealed class FacilityDraft : ObservableObject
         _newPassword.Length > 0 ? "Encrypted when you save: only this gateway can read it."
         : _removePassword ? "The saved password goes when you save."
         : _password is { Length: > 0 } ? "One is saved. Type a new one to replace it."
+        : _kind.SharesPassword ? "None here: the one in Settings is used. One typed here is for this facility alone."
         : "Encrypted when you save: only this gateway can read it.";
 
     /// <summary>Saved: what the file now holds becomes the password, and nothing waits any more.</summary>
@@ -678,14 +687,24 @@ public sealed class FacilityDraft : ObservableObject
     }
 }
 
-/// <summary>One of a connector's settings in the form, kept in its facility's settings.</summary>
-public sealed class SettingRow(FacilityDraft owner, ConnectorField setting) : ObservableObject
+/// <summary>What keeps a connector's settings: a facility, or Settings for all of the connector's facilities.</summary>
+public interface ISettingsOwner
 {
-    public FacilityDraft Owner => owner;
+    string GetSetting(string key);
+    void SetSetting(string key, string value);
+}
+
+/// <summary>One of a connector's settings in a form, kept by its owner.</summary>
+public sealed class SettingRow(ISettingsOwner owner, ConnectorField setting) : ObservableObject
+{
+    public ISettingsOwner Owner => owner;
     public ConnectorField Field => setting;
 
-    public bool IsText => setting.Kind is FieldKind.Text or FieldKind.File;
+    public bool IsText => setting.Kind is FieldKind.Text or FieldKind.File or FieldKind.Program;
     public bool IsFile => setting.Kind == FieldKind.File;
+
+    /// <summary>Has a Browse button: a file to copy in, or a program to point at.</summary>
+    public bool CanBrowse => setting.Kind is FieldKind.File or FieldKind.Program;
     public bool IsFlag => setting.Kind == FieldKind.Flag;
     public bool IsChoice => setting.Kind == FieldKind.Choice;
 

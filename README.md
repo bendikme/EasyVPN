@@ -133,6 +133,11 @@ facility with a mistake in red, and the gateway uses what is saved straight away
 are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which *Open facilities.json* in the
 editor opens in Notepad; *Encrypt a password* in the app makes a `password` for writing it by hand.
 
+*Settings…*, at the top of the app, opens (as administrator) what the facilities of a kind share,
+set once rather than in each: for Tosibox, Tosi Client's program (`TosiboxKey.exe`) and its
+password. They are kept in `%ProgramData%\EasyVPN\Gateway\settings.json`, which the gateway reads
+again whenever it changes; a facility's own setting, or its own password, wins over them.
+
 For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
 desktop that can be reached with Remote Desktop: the app's *Open gateway desktop* button goes there.
 `EasyVPN.Gateway.exe info`, in an administrator console, prints the address, key and fingerprint too.
@@ -230,7 +235,7 @@ has one of each kind.
 | Connector | VPN client | Settings |
 | --- | --- | --- |
 | `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
-| `tosibox` | Tosi Client (once TOSIBOX Key), which has no command line: the EasyVPN Gateway app, started by the gateway in a desktop session, starts the client if need be, enters its password if it asks, searches for the Lock, presses Connect or Disconnect and waits until the client shows it. The facility's `password` is Tosi Client's. | `lock`, `program` |
+| `tosibox` | Tosi Client (once TOSIBOX Key), which has no command line: the EasyVPN Gateway app, started by the gateway in a desktop session, starts the client if need be, types its password if it asks, finds the Lock, presses Connect or Disconnect and waits until the client shows it. Its program and password are usually set once, in Settings. | `lock`, `program` |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
 | `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. `legacy`: `true` allows certificates signed with SHA1 or with short RSA keys (`--tls-cert-profile insecure`), which OpenVPN 2.6 refuses otherwise. | `config`, `user`, `legacy` |
 | `wireguard` | WireGuard for Windows | `config` |
@@ -249,15 +254,17 @@ Disconnect button), so a facility needs no `check` to turn green.
 **Tosibox.** Someone must be signed in to the gateway's desktop: set the gateway to sign in by
 itself. The gateway looks for Tosi Client in every signed-in session, with the app run there with
 that user's full rights (so a client running as administrator can be reached too); when it is in
-none, or only in the notification area, the app starts it in the console's session, from where
-Windows' list of installed programs says it is (or the facility's `program`), and enters its
-password. The app drives it through UI
-Automation where the client allows, and otherwise with the mouse and keyboard, which needs that
-session's screen on and unlocked (not a disconnected Remote Desktop session). Give each facility the
-Lock's name exactly as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes`
-empty unless the Lock is in Layer 2 mode. Should one not connect, run
-`"C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt` on the
-gateway's desktop: it writes what the app sees of the client.
+none, or only in the notification area, the app starts it in the console's session - with the
+program set in *Settings* (`TosiboxKey.exe`), or else one it finds where Windows keeps track of
+programs - and types its password (from *Settings*, or the facility's own). It finds the Lock in
+the list (scrolled to, searched for, or typed into the list), presses Connect or Disconnect, and
+waits until the client shows it. The app drives the client through UI Automation where it allows,
+and otherwise with the mouse and keyboard, as a person would: typing needs that session's screen on
+and unlocked (not a disconnected Remote Desktop session). Give each facility the Lock's name exactly
+as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes` empty unless the Lock
+is in Layer 2 mode. When it cannot find the Lock or read its state, the app saves what it saw of
+the client to `%LOCALAPPDATA%\EasyVPN\tosi-client.txt` and says so; `"C:\Program Files\EasyVPN
+Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt` on the gateway's desktop writes the same.
 
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a

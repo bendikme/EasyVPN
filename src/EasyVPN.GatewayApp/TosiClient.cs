@@ -13,17 +13,18 @@ namespace EasyVPN.GatewayApp;
 /// <summary>
 /// Tosi Client (once TOSIBOX Key) has no command line, so the gateway's tosibox connector has this
 /// app, started in the desktop session where the client runs, do what a person would there:
-/// enter the client's password if it asks, search for the Lock, press its Connect or Disconnect,
-/// and wait until the client shows it so. Through UI Automation where the client offers it, and
-/// with the mouse and keyboard where it does not - which needs the session's screen unlocked.
+/// enter the client's password if it asks, find the Lock, press its Connect or Disconnect, and
+/// wait until the client shows it so. Through UI Automation where the client offers it, and with
+/// the mouse and keyboard where it does not - which needs the session's screen unlocked.
 ///
 ///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]" [--start]   the password in EASYVPN_PASSWORD
 ///   EasyVPN.GatewayApp.exe --tosibox disconnect "Tosibox 15 [Plant]"
 ///   EasyVPN.GatewayApp.exe --tosibox dump > tosi.txt                     what it sees of the client
 ///
-/// With --start, a client that shows no window here is started: from EASYVPN_PROGRAM, or as the
-/// installed programs list it. Started again, a running one that sits in the notification area
-/// shows itself.
+/// With --start, a client that shows no window here is started: from EASYVPN_PROGRAM, or from
+/// wherever Windows keeps track of it. Started again, a running one that sits in the notification
+/// area shows itself. When the Lock cannot be found or read, what was seen of the client is saved
+/// to <see cref="DumpPath"/>, and said.
 /// </summary>
 public static partial class TosiClient
 {
@@ -32,6 +33,8 @@ public static partial class TosiClient
 
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan Connecting = TimeSpan.FromSeconds(75);
+
+    public static string DumpPath { get; } = Path.Combine(Path.GetDirectoryName(CrashLog.Path)!, "tosi-client.txt");
 
     public static int Run(string[] args, Action<string> say)
     {
@@ -46,16 +49,11 @@ public static partial class TosiClient
                 _ => Usage(say),
             };
         }
-        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException or ArgumentException)
-        {
-            say($"Tosi Client could not be driven: {ex.Message}");
-            return 1;
-        }
         catch (Exception ex)
         {
-            // Anything else is a mistake here: said, and written down whole, but never a crash.
+            // Never a crash: said, and written down whole.
             CrashLog.Write(ex, "driving Tosi Client");
-            say($"Tosi Client could not be driven ({ex.GetType().Name}: {ex.Message}). The details are in {CrashLog.Path} on the gateway.");
+            say($"Tosi Client could not be driven ({ex.GetType().Name}: {ex.Message}).{Saved()} The details are in {CrashLog.Path} on the gateway.");
             return 1;
         }
     }
@@ -82,45 +80,54 @@ public static partial class TosiClient
         }
         Front(handle);
         var window = AutomationElement.FromHandle(handle);
-        var search = SearchBox(window);
+        var search = (AutomationElement?)null;
         try
         {
-            var row = Find(handle, window, search, name);
+            var row = Locate(handle, window, name, ref search);
             if (row is null)
             {
-                say($"Tosi Client lists no Lock called '{name}'.");
+                say($"Tosi Client lists no Lock called '{name}', or it could not be found in its list.{Saved(window)}");
                 return 1;
             }
 
-            var state = Read(window, row);
+            var state = Read(Look(window), row);
             if (state.Connected == connect)
             {
                 say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
                 return 0;
             }
-            if (connect && state.Button is { Current.IsEnabled: false })
+            if (connect && state.Button is { Enabled: false })
             {
                 say($"{name} cannot be connected: {state.Status}");
                 return 1;
             }
 
-            Press(window, row, state);
+            Press(Look(window), row, state);
             say($"Pressed {(connect ? "Connect" : "Disconnect")} for {name} in Tosi Client.");
 
-            // Done when the client says so: its button turns, its status follows.
+            // Done when the client says so: its button turns, its status follows. Its list changes
+            // meanwhile (a connected Lock shows its devices), so a moment it cannot be read is skipped.
             var deadline = DateTime.UtcNow + (connect ? Connecting : Settle);
             while (DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(1000);
-                row = Find(handle, window, search, name, research: false) ?? row;
-                state = Read(window, row);
-                if (state.Connected == connect)
+                try
                 {
-                    say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
-                    return 0;
+                    var seen = Look(window);
+                    if (Row(seen, name) is not { } now) continue;
+                    state = Read(seen, now);
+                    if (state.Connected == connect)
+                    {
+                        say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
+                        return 0;
+                    }
+                }
+                catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+                {
+                    // Changed while it was read: look again.
                 }
             }
-            say($"Tosi Client did not show {name} {(connect ? "connected" : "disconnected")} within {(connect ? Connecting : Settle).TotalSeconds:0} s. It says: {state.Status}");
+            say($"Tosi Client did not show {name} {(connect ? "connected" : "disconnected")} within {(connect ? Connecting : Settle).TotalSeconds:0} s. It says: {state.Status}.{Saved(window)}");
             return 1;
         }
         finally
@@ -129,6 +136,8 @@ public static partial class TosiClient
             if (search is not null) Enter(handle, search, "");
         }
     }
+
+    // ---------------------------------------------------------------- starting it
 
     /// <summary>Starts the client, or brings a running one out of the notification area, and waits for its window.</summary>
     private static bool Start(Action<string> say)
@@ -142,7 +151,7 @@ public static partial class TosiClient
         var program = set is { Length: > 0 } ? set : Program();
         if (program is null)
         {
-            say("Tosi Client is not running, and was not found to start: not among the installed programs, the programs started with Windows, the Start menu or Program Files. Give the facility Tosi Client's program (its .exe).");
+            say("Tosi Client is not running, and was not found to start. Set Tosi Client's program (TosiboxKey.exe) in the gateway app's Settings.");
             return false;
         }
 
@@ -158,7 +167,7 @@ public static partial class TosiClient
         }
         if (!WaitUntil(() => FindWindow(MainTitle()) != IntPtr.Zero || FindWindow(PasswordTitle()) != IntPtr.Zero, TimeSpan.FromSeconds(45)))
         {
-            say("Tosi Client was started, but showed no window within 45 s.");
+            say($"{Path.GetFileName(program)} was started, but no Tosi Client window showed within 45 s: if it is not the client, set Tosi Client's program (TosiboxKey.exe) in the gateway app's Settings.");
             return false;
         }
         Thread.Sleep(1500); // Its list fills in a moment later.
@@ -166,25 +175,34 @@ public static partial class TosiClient
     }
 
     /// <summary>
-    /// The client's program, wherever Windows keeps track of it: a copy running elsewhere, the
-    /// programs started with Windows, App Paths, the list of installed programs, the Start menu
-    /// (a shortcut starts it as well as its program), and Program Files.
+    /// The client's program, wherever Windows keeps track of it: a copy running in this session, the
+    /// programs started with Windows, App Paths, the list of installed programs, the Start menu (a
+    /// shortcut starts it as well as its program), and Program Files. Of all found, one named for
+    /// a key or a client goes first: Tosibox installs other programs beside it.
     /// </summary>
-    private static string? Program()
+    private static string? Program() =>
+        Candidates().Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p)))
+            .FirstOrDefault();
+
+    private static IEnumerable<string> Candidates()
     {
+        var session = Process.GetCurrentProcess().SessionId;
         foreach (var process in Process.GetProcesses())
         {
+            string? running = null;
             using (process)
             {
                 try
                 {
-                    if (Product().IsMatch(process.ProcessName) && Client(process.MainModule?.FileName ?? "") is { } running) return running;
+                    if (process.SessionId == session && Product().IsMatch(process.ProcessName)) running = Client(process.MainModule?.FileName ?? "");
                 }
                 catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
                 {
                     // Not ours to look at.
                 }
             }
+            if (running is not null) yield return running;
         }
 
         foreach (var (hive, view) in Registries())
@@ -193,14 +211,14 @@ public static partial class TosiClient
             using (var run = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"))
                 foreach (var value in run?.GetValueNames() ?? [])
                     if (run!.GetValue(value) is string command && (Product().IsMatch(value) || Product().IsMatch(command)) && Client(ExeOf(command)) is { } started)
-                        return started;
+                        yield return started;
 
             using (var paths = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"))
                 foreach (var key in paths?.GetSubKeyNames() ?? [])
                 {
                     using var entry = paths!.OpenSubKey(key);
                     if (entry?.GetValue(null) is string path && (Product().IsMatch(key) || Product().IsMatch(path)) && Client(path.Trim('"')) is { } registered)
-                        return registered;
+                        yield return registered;
                 }
 
             using var programs = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
@@ -208,9 +226,10 @@ public static partial class TosiClient
             {
                 using var entry = programs!.OpenSubKey(key);
                 if (entry?.GetValue("DisplayName") is not string name || !Product().IsMatch(name)) continue;
-                if (entry.GetValue("DisplayIcon") is string icon && Client(icon.Split(',')[0].Trim().Trim('"')) is { } fromIcon) return fromIcon;
+                if (entry.GetValue("DisplayIcon") is string icon && Client(icon.Split(',')[0].Trim().Trim('"')) is { } fromIcon) yield return fromIcon;
                 foreach (var folder in new[] { entry.GetValue("InstallLocation") as string, Path.GetDirectoryName(ExeOf(entry.GetValue("UninstallString") as string ?? "")) })
-                    if (ClientIn(folder) is { } inFolder) return inFolder;
+                    foreach (var inFolder in ClientsIn(folder))
+                        yield return inFolder;
             }
         }
 
@@ -218,9 +237,9 @@ public static partial class TosiClient
         {
             var folder = Environment.GetFolderPath(menu);
             if (!Directory.Exists(folder)) continue;
-            if (Directory.EnumerateFiles(folder, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
-                    .FirstOrDefault(l => Product().IsMatch(Path.GetFileNameWithoutExtension(l)) && !NotTheClient().IsMatch(Path.GetFileName(l))) is { } shortcut)
-                return shortcut;
+            foreach (var shortcut in Directory.EnumerateFiles(folder, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                         .Where(l => Product().IsMatch(Path.GetFileNameWithoutExtension(l)) && !NotTheClient().IsMatch(Path.GetFileName(l))))
+                yield return shortcut;
         }
 
         foreach (var root in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 }
@@ -228,9 +247,8 @@ public static partial class TosiClient
                      .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"))
                      .Where(Directory.Exists))
             foreach (var folder in Directory.EnumerateDirectories(root, "*", new EnumerationOptions { IgnoreInaccessible = true }).Where(d => Product().IsMatch(Path.GetFileName(d))))
-                if (ClientIn(folder) is { } inProgramFiles)
-                    return inProgramFiles;
-        return null;
+                foreach (var inProgramFiles in ClientsIn(folder))
+                    yield return inProgramFiles;
     }
 
     private static (RegistryHive, RegistryView)[] Registries() =>
@@ -242,18 +260,18 @@ public static partial class TosiClient
             ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
             : command.Trim();
 
-    /// <summary>The client in a folder that may hold other programs too (OpenVPN, for one): the one named for it, or the only one.</summary>
-    private static string? ClientIn(string? folder)
-    {
-        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
-        var found = Directory.EnumerateFiles(folder, "*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 1, IgnoreInaccessible = true })
-            .Select(Client).OfType<string>().ToList();
-        return found.FirstOrDefault(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p))) ?? (found.Count == 1 ? found[0] : null);
-    }
+    /// <summary>The programs in a folder (and the one below) that may be the client.</summary>
+    private static IEnumerable<string> ClientsIn(string? folder) =>
+        string.IsNullOrEmpty(folder) || !Directory.Exists(folder)
+            ? []
+            : Directory.EnumerateFiles(folder, "*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 1, IgnoreInaccessible = true })
+                .Select(Client).OfType<string>().Where(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p)));
 
     /// <summary>The path, when it is the client itself rather than its uninstaller, updater or service.</summary>
     private static string? Client(string path) =>
         path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path) && !NotTheClient().IsMatch(Path.GetFileName(path)) ? path : null;
+
+    // ---------------------------------------------------------------- signing in
 
     /// <summary>The client's password, when it asks for it - when it has just started.</summary>
     private static bool SignIn(string? password, Action<string> say, out int code)
@@ -263,7 +281,7 @@ public static partial class TosiClient
         if (handle == IntPtr.Zero) return true;
         if (string.IsNullOrEmpty(password))
         {
-            say("Tosi Client asks for its password: give the facility the client's password in the facility editor.");
+            say("Tosi Client asks for its password: set it in the gateway app's Settings (or for this facility in the facility editor).");
             code = 1;
             return false;
         }
@@ -278,7 +296,8 @@ public static partial class TosiClient
         }
 
         // Its OK button waits for the password to be typed: it stays off for text put in any other way.
-        var ok = Buttons(dialog).FirstOrDefault(b => Is(b, "OK"));
+        var ok = dialog.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button))
+            .Cast<AutomationElement>().FirstOrDefault(b => string.Equals(b.Current.Name.Trim(), "OK", StringComparison.OrdinalIgnoreCase));
         if (ok is not null && !WaitUntil(() => ok.Current.IsEnabled, TimeSpan.FromSeconds(3)))
         {
             say(typed
@@ -292,7 +311,7 @@ public static partial class TosiClient
 
         if (!WaitUntil(() => FindWindow(PasswordTitle()) == IntPtr.Zero, Settle))
         {
-            say("Tosi Client did not take the password: check the facility's password.");
+            say("Tosi Client did not take the password: check it in the gateway app's Settings.");
             code = 1;
             return false;
         }
@@ -300,70 +319,156 @@ public static partial class TosiClient
         return true;
     }
 
-    /// <summary>
-    /// The Lock's row: searched for by its whole name, then by the part in brackets and the part
-    /// before them, then in the whole list, as the client's search may match only some of it.
-    /// </summary>
-    private static AutomationElement? Find(IntPtr handle, AutomationElement window, AutomationElement? search, string name, bool research = true)
+    // ---------------------------------------------------------------- what the window shows
+
+    /// <summary>One element of the window as it was when looked at.</summary>
+    private sealed record Seen(AutomationElement Element, string Name, ControlType Type, Rect Rect, bool Offscreen, bool Enabled, string Help)
     {
-        if (search is null || !research) return Row(window, name);
-        var brackets = Regex.Match(name, @"^(.*?)\s*\[(.+)\]\s*$");
-        string[] terms = brackets.Success ? [name, brackets.Groups[2].Value, brackets.Groups[1].Value, ""] : [name, ""];
-        foreach (var term in terms.Distinct())
+        public bool Visible => !Offscreen && !Rect.IsEmpty;
+    }
+
+    /// <summary>
+    /// Every element of the window, with what is needed of each fetched in one go: quick even when a
+    /// connected Lock lists a hundred devices, and steady while the client changes underneath.
+    /// </summary>
+    private static List<Seen> Look(AutomationElement window)
+    {
+        var cache = new CacheRequest { AutomationElementMode = AutomationElementMode.Full };
+        foreach (var property in new[] { AutomationElement.NameProperty, AutomationElement.ControlTypeProperty, AutomationElement.BoundingRectangleProperty,
+                     AutomationElement.IsOffscreenProperty, AutomationElement.IsEnabledProperty, AutomationElement.HelpTextProperty })
+            cache.Add(property);
+        AutomationElementCollection all;
+        using (cache.Activate())
+            all = window.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
+        var seen = new List<Seen>(all.Count);
+        foreach (AutomationElement e in all)
         {
-            if (Enter(handle, search, term) is null) return Row(window, name);
-            AutomationElement? row = null;
-            if (WaitUntil(() => (row = Row(window, name)) is not null, TimeSpan.FromSeconds(3))) return row;
+            try
+            {
+                var c = e.Cached;
+                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, c.BoundingRectangle, c.IsOffscreen, c.IsEnabled, c.HelpText ?? ""));
+            }
+            catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException)
+            {
+                // Gone already.
+            }
+        }
+        return seen;
+    }
+
+    /// <summary>The Lock's row, where it can be seen.</summary>
+    private static Seen? Row(List<Seen> seen, string name) =>
+        seen.FirstOrDefault(s => s.Visible && s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The Lock's row, brought into view: where it is, scrolled to where it is listed out of view,
+    /// found with the client's search (its whole name, then the part in brackets, then the part
+    /// before), or typed into the list itself, which goes to the row whose name starts so.
+    /// </summary>
+    private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search)
+    {
+        var seen = Look(window);
+        if (Row(seen, name) is { } here) return here;
+
+        foreach (var listed in seen.Where(s => s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!ScrollTo(listed.Element)) continue;
+            if (Row(Look(window), name) is { } scrolled) return scrolled;
+        }
+
+        if (SearchBox(seen) is { } box)
+        {
+            var brackets = Regex.Match(name, @"^(.*?)\s*\[(.+)\]\s*$");
+            string[] terms = brackets.Success ? [name, brackets.Groups[2].Value, brackets.Groups[1].Value] : [name];
+            foreach (var term in terms.Distinct())
+            {
+                if (Enter(handle, box.Element, term) is null) break;
+                search = box.Element;
+                Seen? found = null;
+                if (WaitUntil(() => (found = Row(Look(window), name)) is not null, TimeSpan.FromSeconds(3))) return found;
+            }
+            if (search is not null) Enter(handle, box.Element, "");
+            search = null;
+            seen = Look(window);
+        }
+
+        // Typed into the list: a click on a row of it, then the name.
+        if (Front(handle) && seen.FirstOrDefault(s => s.Visible && (s.Type == ControlType.TreeItem || s.Type == ControlType.DataItem || s.Type == ControlType.ListItem)) is { } item)
+        {
+            try
+            {
+                Click(new Point(item.Rect.Left + Math.Min(40, item.Rect.Width / 2), item.Rect.Top + item.Rect.Height / 2));
+                if (GetForegroundWindow() == handle)
+                {
+                    Type(name);
+                    Seen? typed = null;
+                    if (WaitUntil(() => (typed = Row(Look(window), name)) is not null, TimeSpan.FromSeconds(2))) return typed;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // The desktop takes no typing.
+            }
         }
         return null;
     }
 
-    private static AutomationElement? Row(AutomationElement window, string name)
+    private static bool ScrollTo(AutomationElement element)
     {
-        var named = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name, PropertyConditionFlags.IgnoreCase));
-        return named.Cast<AutomationElement>().FirstOrDefault(e =>
-            e.Current.ControlType != ControlType.Edit && !e.Current.IsOffscreen && !e.Current.BoundingRectangle.IsEmpty);
+        try
+        {
+            if (element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out var scroll)) ((ScrollItemPattern)scroll).ScrollIntoView();
+            else if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select)) ((SelectionItemPattern)select).Select();
+            else return false;
+            Thread.Sleep(300);
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
+        {
+            return false;
+        }
     }
 
-    private sealed record State(bool Connected, AutomationElement? Button, string Status);
+    private sealed record State(bool Connected, Seen? Button, string Status);
 
-    /// <summary>What the client shows beside the row: its button, if it is one UI Automation sees, and its status.</summary>
-    private static State Read(AutomationElement window, AutomationElement row)
+    /// <summary>
+    /// What the client shows on the row: its button, if it is one UI Automation sees, and its status.
+    /// A button out of view does not count - the client may keep the one it replaced - and of a
+    /// Connect and a Disconnect both shown, Disconnect does.
+    /// </summary>
+    private static State Read(List<Seen> seen, Seen row)
     {
-        var line = row.Current.BoundingRectangle;
-        bool Beside(AutomationElement e)
-        {
-            var r = e.Current.BoundingRectangle;
-            return !r.IsEmpty && r.Top + r.Height / 2 >= line.Top && r.Top + r.Height / 2 <= line.Bottom;
-        }
+        // The row's own line: an opened row may measure as tall as the devices listed under it.
+        var top = row.Rect.Top;
+        var bottom = row.Rect.Top + Math.Min(row.Rect.Height, 48);
+        bool OnLine(Seen s) => s.Visible && s.Rect.Top + s.Rect.Height / 2 >= top && s.Rect.Top + s.Rect.Height / 2 <= bottom;
 
-        var button = Buttons(window).Where(Beside).FirstOrDefault(b => ConnectButton().IsMatch(b.Current.Name));
-        var status = string.Join(" ", window.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition).Cast<AutomationElement>()
-            .Where(e => e.Current.ControlType != ControlType.Button && e.Current.ControlType != ControlType.Edit && Beside(e))
-            .Select(e => e.Current.Name.Trim())
+        var buttons = seen.Where(s => s.Type == ControlType.Button && OnLine(s) && ConnectButton().IsMatch(s.Name.Trim())).ToList();
+        var button = buttons.FirstOrDefault(b => b.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)) ?? buttons.FirstOrDefault();
+        var status = string.Join(" ", seen
+            .Where(s => s.Type != ControlType.Button && s.Type != ControlType.Edit && OnLine(s))
+            .Select(s => s.Name.Trim())
             // Not the Lock's own name, nor a button's label inside the button.
-            .Where(text => text.Length > 0 && !string.Equals(text, row.Current.Name, StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
+            .Where(text => text.Length > 0 && !string.Equals(text, row.Name.Trim(), StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
             .Distinct());
 
         var connected = button is not null
-            ? button.Current.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)
+            ? button.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)
             : Connected().IsMatch(status) && !NotConnected().IsMatch(status);
         return new State(connected, button, status);
     }
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
-    private static void Press(AutomationElement window, AutomationElement row, State state)
+    private static void Press(List<Seen> seen, Seen row, State state)
     {
         if (state.Button is { } button)
         {
-            Press(button);
+            Press(button.Element);
             return;
         }
-        var column = window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, "Connection", PropertyConditionFlags.IgnoreCase))
-            ?? throw new InvalidOperationException("Tosi Client shows no Connect button, and no Connection column to find one in. Run --tosibox dump and look.");
-        var x = column.Current.BoundingRectangle;
-        var y = row.Current.BoundingRectangle;
-        Click(new Point(x.Left + x.Width / 2, y.Top + y.Height / 2));
+        var column = seen.FirstOrDefault(s => s.Visible && string.Equals(s.Name.Trim(), "Connection", StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Tosi Client shows no Connect button, and no Connection column to find one in.");
+        Click(new Point(column.Rect.Left + column.Rect.Width / 2, row.Rect.Top + Math.Min(row.Rect.Height, 48) / 2));
     }
 
     private static void Press(AutomationElement button)
@@ -377,39 +482,38 @@ public static partial class TosiClient
         Click(new Point(r.Left + r.Width / 2, r.Top + r.Height / 2));
     }
 
-    private static AutomationElement? SearchBox(AutomationElement window)
+    /// <summary>The search box: one that says so, or else the box shown highest (and furthest right) in the window.</summary>
+    private static Seen? SearchBox(List<Seen> seen)
     {
-        var boxes = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit))
-            .Cast<AutomationElement>().ToList();
-        return boxes.FirstOrDefault(b => (b.Current.Name + b.Current.HelpText).Contains("Search", StringComparison.OrdinalIgnoreCase))
-            ?? boxes.FirstOrDefault();
+        var boxes = seen.Where(s => s.Type == ControlType.Edit && s.Visible).ToList();
+        return boxes.FirstOrDefault(b => (b.Name + b.Help).Contains("Search", StringComparison.OrdinalIgnoreCase))
+            ?? boxes.OrderBy(b => b.Rect.Top).ThenByDescending(b => b.Rect.Left).FirstOrDefault();
     }
 
-    private static IEnumerable<AutomationElement> Buttons(AutomationElement within) =>
-        within.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)).Cast<AutomationElement>();
-
-    private static bool Is(AutomationElement e, string name) => string.Equals(e.Current.Name.Trim(), name, StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
-    /// Puts text in a box as a person does - the window in front, the box focused, the text typed -
-    /// as the client reacts to typing alone (its OK button, its search). Typed only once the window
-    /// is in front, so nothing lands anywhere else; otherwise put there through UI Automation.
+    /// Puts text in a box as a person does - a click into it, the text typed - as the client reacts
+    /// to typing alone (its OK button, its search). Typed only once its window is in front, so
+    /// nothing lands anywhere else, and read back where it can be. Otherwise put there through UI
+    /// Automation.
     /// </summary>
     /// <returns>True when typed, false when put there otherwise, null when neither would do.</returns>
     private static bool? Enter(IntPtr window, AutomationElement box, string text)
     {
         try
         {
-            if (Front(window))
+            Front(window);
+            // A click focuses the box as surely as a person's, and brings the window to the front
+            // with it; UI Automation's focus as well, should the click not get there.
+            var r = box.Current.BoundingRectangle;
+            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2));
+            if (GetForegroundWindow() != window) Front(window);
+            box.SetFocus();
+            if (GetForegroundWindow() == window)
             {
-                box.SetFocus();
-                if (GetForegroundWindow() == window)
-                {
-                    SelectAll();
-                    PressKey(0x08); // Backspace
-                    Type(text);
-                    return true;
-                }
+                SelectAll();
+                PressKey(0x08); // Backspace
+                Type(text);
+                if (ValueOf(box) is not { } now || now == text) return true;
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
@@ -431,18 +535,38 @@ public static partial class TosiClient
         return null;
     }
 
+    /// <summary>What a box holds, when it can be read: not a password.</summary>
+    private static string? ValueOf(AutomationElement box)
+    {
+        try
+        {
+            return !box.Current.IsPassword && box.TryGetCurrentPattern(ValuePattern.Pattern, out var value) ? ((ValuePattern)value).Current.Value : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
+        {
+            return null;
+        }
+    }
+
     private static bool WaitUntil(Func<bool> done, TimeSpan within)
     {
         var deadline = DateTime.UtcNow + within;
-        while (!done())
+        while (true)
         {
+            try
+            {
+                if (done()) return true;
+            }
+            catch (Exception ex) when (ex is ElementNotAvailableException or COMException)
+            {
+                // Changed while it was looked at: look again.
+            }
             if (DateTime.UtcNow >= deadline) return false;
             Thread.Sleep(250);
         }
-        return true;
     }
 
-    // ---------------------------------------------------------------- what it sees
+    // ---------------------------------------------------------------- what it sees, written down
 
     private static int Dump(Action<string> say)
     {
@@ -456,6 +580,24 @@ public static partial class TosiClient
         }
         if (!found) say("No Tosi Client window on this desktop.");
         return found ? 0 : NotHere;
+    }
+
+    /// <summary>What was seen of the client, saved for working out why: " It is in …", or nothing when it could not be.</summary>
+    private static string Saved(AutomationElement? window = null)
+    {
+        try
+        {
+            var lines = new List<string>();
+            if (window is not null) Write(window, 0, lines.Add);
+            else Dump(lines.Add);
+            Directory.CreateDirectory(Path.GetDirectoryName(DumpPath)!);
+            File.WriteAllLines(DumpPath, lines);
+            return $" What it showed is in {DumpPath} on the gateway.";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
     }
 
     private static void Write(AutomationElement element, int depth, Action<string> say)
@@ -481,13 +623,15 @@ public static partial class TosiClient
     [GeneratedRegex(@"^(Dis)?connect$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectButton();
 
-    [GeneratedRegex(@"\b(Tosi|TOSIBOX)\b", RegexOptions.IgnoreCase)]
+    /// <summary>Tosi, TOSIBOX, TosiboxKey …</summary>
+    [GeneratedRegex(@"\btosi", RegexOptions.IgnoreCase)]
     private static partial Regex Product();
 
     [GeneratedRegex(@"unins|uninstall|update|service|helper|crash|driver|tapctl|devcon|setup|openvpn|redist", RegexOptions.IgnoreCase)]
     private static partial Regex NotTheClient();
 
-    [GeneratedRegex(@"tosi|key|client", RegexOptions.IgnoreCase)]
+    /// <summary>The client among Tosibox's programs: TosiboxKey.exe, or one called a client.</summary>
+    [GeneratedRegex(@"key|client", RegexOptions.IgnoreCase)]
     private static partial Regex ClientName();
 
     [GeneratedRegex(@"\bconnected\b", RegexOptions.IgnoreCase)]
@@ -543,7 +687,19 @@ public static partial class TosiClient
     {
         SetCursorPos((int)at.X, (int)at.Y);
         Send(Mouse(0x0002), Mouse(0x0004)); // left down, left up
-        Thread.Sleep(200);
+        Thread.Sleep(250);
+    }
+
+    private static void TryClick(Point at)
+    {
+        try
+        {
+            Click(at);
+        }
+        catch (InvalidOperationException)
+        {
+            // No mouse to be had here; the other ways will do.
+        }
     }
 
     private static void SelectAll() => Send(Key(0x11, 0), Key(0x41, 0), Key(0x41, 2), Key(0x11, 2)); // Ctrl+A
