@@ -27,7 +27,9 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
 - **The gateway connects one facility at a time**, shared by every workstation. Connecting takes
   down whatever was up, runs the facility's *connector* (a small PowerShell script that drives one
   kind of VPN client), and waits until the facility's *check* address (a PLC's port 102, an HMI's
-  443) answers. Only then does it open its relay, and only to that facility's networks.
+  443) answers. Only then does it open its relay, and only to that facility's networks: its
+  `routes`, or for a facility without any, the networks its VPN set up on the gateway while
+  connecting (most VPN servers push them then, rather than writing them into the profile).
 - **The workstation's adapter stays put.** The agent keeps gost running in tungo mode: a Wintun
   adapter whose TCP and UDP traffic goes over TLS to the gateway's relay, which makes the
   connections itself, so through whichever VPN is up. Switching facilities changes only which
@@ -120,7 +122,11 @@ notification area of everyone who signs in to the gateway (and in the Start menu
 *Edit facilities* (or *Edit* beside one) opens the **facility editor**, as administrator: add,
 duplicate and remove facilities, choose each one's VPN client from the connectors and fill in what
 that one needs, browse for its profile file (copied into `%ProgramData%\EasyVPN\Gateway\vpn`, where
-only administrators can change it) and type its password (encrypted for this machine). It marks a
+only administrators can change it) and type its password (encrypted for this machine). An OpenVPN
+profile is read as it is copied: its `route` lines fill in the routes, and in the copy, what
+OpenVPN 2.6 no longer takes is rewritten (`tls-remote` becomes `verify-x509-name`; `cipher` is
+added to `data-ciphers`; `comp-lzo` gets `allow-compression asym`), and old certificates tick
+*Allow old certificates*. It marks a
 facility with a mistake in red, and the gateway uses what is saved straight away. The facilities
 are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which *Open facilities.json* in the
 editor opens in Notepad; *Encrypt a password* in the app makes a `password` for writing it by hand.
@@ -210,7 +216,7 @@ has one of each kind.
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
 | `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
-| `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. |
+| `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
 | `check` | `host:port` inside the facility that answers when it is reachable. Strongly recommended: without it a connector that runs without error is taken at its word, and switching cannot confirm the previous facility is really down. |
@@ -223,7 +229,7 @@ has one of each kind.
 | --- | --- | --- |
 | `manual` | Any client: someone connects it on the gateway desktop (TOSIBOX Key, MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check. | none |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
-| `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. | `config`, `user` |
+| `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. `legacy`: `true` allows certificates signed with SHA1 or with short RSA keys (`--tls-cert-profile insecure`), which OpenVPN 2.6 refuses otherwise. | `config`, `user`, `legacy` |
 | `wireguard` | WireGuard for Windows | `config` |
 | `cisco` | Cisco Secure Client / AnyConnect, through `vpncli` | `host`, `user`, `group` |
 | `sophos` | Sophos Connect, through `sccli`: IPsec (`.scx`) and provisioning (`.pro`) files | `config`, `connection`, `user` |
@@ -347,7 +353,12 @@ connectors follow their vendors' documented command lines but have not met a rea
 The facility editor: reading the sample and writing it back unchanged, a new facility's id,
 validation, switching connectors, passwords, links, a file changed in Notepad meanwhile and a file
 that does not parse, all without its window. Its window loads with every binding resolved, but has
-not been looked at on a real desktop yet.
+not been looked at on a real desktop yet. Reading OpenVPN profiles: `route` lines, and the
+rewrites for OpenVPN 2.6 on an old Sophos UTM profile.
+
+Routes from the VPN: reading this machine's routing table, and picking out the VPN's networks from
+a made-up one (its own adapter's host routes, broadcasts, multicast, a route for all traffic and
+routes on other adapters left out). Not yet with a real VPN adding them.
 
 For Layer 2: the gateway's Layer 2 port (the key, refusing links while no Layer 2 facility is
 connected), a Layer 2 facility failing cleanly on a gateway without the adapter, and the app showing

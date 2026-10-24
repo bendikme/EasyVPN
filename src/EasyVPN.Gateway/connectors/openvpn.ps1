@@ -4,6 +4,8 @@
     Settings:  config   full path to the .ovpn file (required)
                user     the user name, when the server asks for one; the password is the
                         facility's "password"
+               legacy   "true" allows old certificates, signed with SHA1 or with RSA keys under
+                        2048 bits, which OpenVPN 2.6 refuses otherwise (--tls-cert-profile insecure)
 
     Check: OpenVPN installed, and the profile there.
 #>
@@ -45,6 +47,7 @@ if (-not (Test-Path $openvpn)) { throw "OpenVPN is not installed ($openvpn)." }
 if (-not $env:EASYVPN_CONFIG) { throw 'Set "config" to the .ovpn file.' }
 
 $arguments = @('--config', "`"$env:EASYVPN_CONFIG`"", '--log', "`"$logFile`"", '--service', $exitEvent, '0')
+if ($env:EASYVPN_LEGACY -eq 'true') { $arguments += '--tls-cert-profile', 'insecure' }
 if ($env:EASYVPN_USER) {
     # The work folder is readable by SYSTEM and administrators only; the file goes on disconnect.
     [System.IO.File]::WriteAllLines($authFile, [string[]]@($env:EASYVPN_USER, $env:EASYVPN_PASSWORD))

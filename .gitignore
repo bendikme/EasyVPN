@@ -3,3 +3,6 @@ obj/
 artifacts/
 .vs/
 *.user
+
+# Customers' VPN profiles carry private keys and passwords.
+*.ovpn

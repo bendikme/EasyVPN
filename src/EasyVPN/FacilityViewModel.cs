@@ -10,8 +10,8 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
     public string Id => Info.Id;
     public string Name => Info.Name;
     public string Customer => string.IsNullOrWhiteSpace(Info.Customer) ? "Other" : Info.Customer;
-    public string Routes => string.Join(", ", Info.Routes);
-    public string Summary => $"{Info.Connector} · {(Info.Layer2 ? "Layer 2" : Routes)}";
+    public string Routes => Info.Routes.Count == 0 && !Info.Layer2 ? "those its VPN sets up when it connects" : string.Join(", ", Info.Routes);
+    public string Summary => $"{Info.Connector} · {(Info.Layer2 ? "Layer 2" : Info.Routes.Count == 0 ? "networks from its VPN" : Routes)}";
 
     public string Link => Info.Layer2
         ? $"Layer 2: the facility's LAN, on this PC's \"{Defaults.Layer2Adapter}\" adapter"

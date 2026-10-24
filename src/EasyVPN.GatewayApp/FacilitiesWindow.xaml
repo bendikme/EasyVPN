@@ -260,9 +260,9 @@
                             <TextBlock Style="{StaticResource HintStyle}" Margin="24,2,0,0" Text="Workstations then get the facility's LAN on their EasyVPN L2 adapter, so routes and DNS are not used." Visibility="{Binding Layer2, Converter={StaticResource Visible}}" />
 
                             <StackPanel Visibility="{Binding Layer2, Converter={StaticResource Visible}, ConverterParameter=invert}">
-                                <TextBlock Style="{StaticResource LabelStyle}" Text="Networks" />
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Routes" />
                                 <TextBox Style="{StaticResource LinesStyle}" FontFamily="Consolas" Text="{Binding Routes, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock Style="{StaticResource HintStyle}" Text="The facility's networks, one per line, such as 10.60.0.0/24. Workstations send these, and only these, to the gateway." />
+                                <TextBlock Style="{StaticResource HintStyle}" Text="The facility's networks, one per line, such as 10.60.0.0/24: workstations send these, and only these, to the gateway. Leave it empty to use the networks its VPN sets up when it connects; most VPN servers send them then, rather than putting them in the profile." />
                             </StackPanel>
 
                             <TextBlock Style="{StaticResource LabelStyle}" Text="Check" />

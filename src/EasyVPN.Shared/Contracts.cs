@@ -40,13 +40,18 @@ public sealed record FacilityLink(string Name, string Url);
 
 public sealed record LogLine(DateTimeOffset Time, string Text);
 
+/// <summary>
+/// <see cref="Routes"/>: while a routed facility is connected, the networks the gateway carries to
+/// it - its own routes, or for one without any, those its VPN set up. Clients route these.
+/// </summary>
 public sealed record GatewayStatus(
     ConnectionState State,
     string? FacilityId,
     string? Message,
     string? Client,
     int RelayPort,
-    IReadOnlyList<LogLine> Log);
+    IReadOnlyList<LogLine> Log,
+    IReadOnlyList<string>? Routes = null);
 
 /// <summary>
 /// The gateway as the EasyVPN Gateway app on its desktop shows it: the connection, what

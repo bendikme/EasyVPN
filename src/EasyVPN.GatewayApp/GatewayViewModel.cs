@@ -334,7 +334,7 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
     {
         Info.Customer,
         Info.Connector,
-        Info.Layer2 ? "Layer 2" : string.Join(", ", Info.Routes),
+        Info.Layer2 ? "Layer 2" : Info.Routes.Count == 0 ? "networks from its VPN" : string.Join(", ", Info.Routes),
         Info.Check is { } check ? $"check {check}" : "no check",
     }.Where(s => s.Length > 0));
 

@@ -10,7 +10,8 @@ public sealed class Relay(GatewaySettings settings, GatewayCertificate certifica
 {
     private readonly GostProcess _gost = new(Path.Combine(GatewaySettings.Folder, "relay.json"), log.Add);
 
-    public void Open(Facility facility) => _gost.Start(new
+    /// <param name="routes">The facility's networks: its own routes, or those its VPN set up.</param>
+    public void Open(Facility facility, IReadOnlyList<string> routes) => _gost.Start(new
     {
         Log = new { Level = "warn" },
         Services = new[]
@@ -26,7 +27,7 @@ public sealed class Relay(GatewaySettings settings, GatewayCertificate certifica
         },
         Bypasses = new[]
         {
-            new { Name = "facility", Whitelist = true, Matchers = facility.Routes.Concat(facility.Dns?.Servers ?? []).Distinct() },
+            new { Name = "facility", Whitelist = true, Matchers = routes.Concat(facility.Dns?.Servers ?? []).Distinct() },
         },
     });
 

@@ -25,7 +25,10 @@ public sealed partial class Facility
     /// <summary>Handed to the connector as <c>EASYVPN_PASSWORD</c>; see <see cref="Secret"/>.</summary>
     public string? Password { get; set; }
 
-    /// <summary>The facility's networks, as CIDR. Clients route these, and only these, to the gateway.</summary>
+    /// <summary>
+    /// The facility's networks, as CIDR. Clients route these, and only these, to the gateway. None:
+    /// the networks its VPN sets up when it connects (<see cref="VpnRoutes"/>).
+    /// </summary>
     public List<string> Routes { get; set; } = [];
 
     /// <summary>
@@ -57,7 +60,6 @@ public sealed partial class Facility
     public string? Problem() => this switch
     {
         _ when !IdPattern().IsMatch(Id) => "needs an id of letters, digits, '.', '-' and '_'",
-        { Routes.Count: 0, Layer2: false } => "has no routes",
         _ when Routes.FirstOrDefault(r => !IPNetwork.TryParse(r, out _)) is { } route =>
             $"has a route that is not a network in CIDR form: {route}",
         { Check: { } check } when !Probe.TrySplit(check, out _, out _) => $"has a check that is not host:port: {check}",

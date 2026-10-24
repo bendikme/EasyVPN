@@ -333,7 +333,8 @@ public sealed class FacilitiesViewModel : ObservableObject
 
     /// <summary>
     /// A profile or tunnel file, copied into the gateway's own vpn folder: the connector runs it as
-    /// SYSTEM, so it must be somewhere only administrators can change, and stay put.
+    /// SYSTEM, so it must be somewhere only administrators can change, and stay put. An OpenVPN
+    /// profile is also read for its networks, and made fit for OpenVPN 2.6.
     /// </summary>
     private void Browse(SettingRow row)
     {
@@ -342,24 +343,47 @@ public sealed class FacilitiesViewModel : ObservableObject
 
         var source = dialog.FileName;
         var folder = Directory.CreateDirectory(Path.Combine(_folder, "vpn")).FullName;
-        if (string.Equals(Path.GetDirectoryName(Path.GetFullPath(source)), folder, StringComparison.OrdinalIgnoreCase))
-        {
-            row.Value = source;
-            return;
-        }
-        // Named after the facility, when its id will do for a file name.
-        var id = row.Owner.Id.Trim();
-        var name = new Facility { Id = id, Layer2 = true }.Problem() is null ? id : Path.GetFileNameWithoutExtension(source);
-        var target = Path.Combine(folder, name + Path.GetExtension(source));
+        var target = source;
+        var said = new List<string>();
         try
         {
-            File.Copy(source, target, overwrite: true);
+            if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(source)), folder, StringComparison.OrdinalIgnoreCase))
+            {
+                // Named after the facility, when its id will do for a file name.
+                var id = row.Owner.Id.Trim();
+                var name = new Facility { Id = id, Layer2 = true }.Problem() is null ? id : Path.GetFileNameWithoutExtension(source);
+                target = Path.Combine(folder, name + Path.GetExtension(source));
+                File.Copy(source, target, overwrite: true);
+                said.Add($"{Path.GetFileName(source)} copied to {target}.");
+            }
             row.Value = target;
-            Status = $"{Path.GetFileName(source)} copied to {target}.";
+            if (row.Owner.Kind.Name == "openvpn") said.AddRange(TakeIn(row.Owner, target));
+            Status = string.Join(" ", said);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Error = $"{Path.GetFileName(source)} could not be copied: {ex.Message}";
+        }
+    }
+
+    /// <summary>What an OpenVPN profile tells about its facility, put into the form.</summary>
+    private static IEnumerable<string> TakeIn(FacilityDraft draft, string profile)
+    {
+        var reading = OpenVpnProfile.Adapt(profile);
+        foreach (var change in reading.Changes) yield return $"In that copy, {change}.";
+
+        if (reading.Routes.Count == 0)
+            yield return "It names no networks, so its server sends them when it connects: leave Routes empty to use those.";
+        else if (draft.Routes.Trim().Length == 0)
+        {
+            draft.Routes = string.Join(Environment.NewLine, reading.Routes);
+            yield return $"Routes taken from it: {string.Join(", ", reading.Routes)}.";
+        }
+
+        if (reading.OldCertificates && draft.Fields.FirstOrDefault(f => f.Field.Key == "legacy") is { IsChecked: false } legacy)
+        {
+            legacy.IsChecked = true;
+            yield return "Its certificates are old (SHA1, or a short RSA key), which OpenVPN 2.6 refuses unless they are allowed: that is now ticked.";
         }
     }
 }

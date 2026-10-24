@@ -243,7 +243,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
                 Publish(gateway.State, wanted, gateway.Message);
                 break;
             case ConnectionState.Connected when _carried is null:
-                await CarryAsync(settings, wanted, gateway.RelayPort, ct);
+                await CarryAsync(settings, wanted, gateway, ct);
                 break;
             case ConnectionState.Connected when _carried.Layer2:
                 await FollowLinkAsync(_carried);
@@ -260,7 +260,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         }
     }
 
-    private async Task CarryAsync(AgentSettings settings, string id, int relayPort, CancellationToken ct)
+    private async Task CarryAsync(AgentSettings settings, string id, GatewayStatus gateway, CancellationToken ct)
     {
         var facility = (await Gateway().FacilitiesAsync(ct)).FirstOrDefault(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
         if (facility is null)
@@ -268,6 +268,8 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
             await EndAsync(ConnectionState.Failed, id, $"The gateway no longer has the facility '{id}'");
             return;
         }
+        // What the gateway carries: for a facility without routes of its own, what its VPN set up.
+        if (!facility.Layer2 && gateway.Routes is { Count: > 0 } routes) facility = facility with { Routes = routes };
 
         _carried = facility;
         if (facility.Layer2)
@@ -289,7 +291,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         }
 
         Publish(ConnectionState.Connecting, id, "Checking the connection from this PC");
-        var problem = await VerifyAsync(settings, facility, relayPort, ct);
+        var problem = await VerifyAsync(settings, facility, gateway.RelayPort, ct);
         if (problem is not null)
         {
             await EndAsync(ConnectionState.Failed, id, problem);

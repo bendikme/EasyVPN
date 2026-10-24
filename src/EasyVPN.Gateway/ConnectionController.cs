@@ -14,6 +14,9 @@ namespace EasyVPN.Gateway;
 ///
 /// While connected the facility is checked every few seconds. When it stops answering, the way in
 /// closes until it answers again, so client traffic is blocked rather than sent some other way.
+///
+/// A routed facility without routes of its own gets the networks its VPN sets up while connecting
+/// (<see cref="VpnRoutes"/>): the relay opens to those, and clients route those.
 /// </summary>
 public sealed class ConnectionController(
     FacilityCatalog catalog,
@@ -25,6 +28,7 @@ public sealed class ConnectionController(
 {
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CleanupWait = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan RoutesPoll = TimeSpan.FromSeconds(2);
     private const int MissesBeforeInterrupted = 2;
 
     private readonly SemaphoreSlim _busy = new(1, 1);
@@ -40,11 +44,14 @@ public sealed class ConnectionController(
     private string? _client;
     private string? _message;
 
+    // The networks the way in opens to: the facility's routes, or those its VPN set up.
+    private IReadOnlyList<string>? _routes;
+
     public GatewayStatus Status
     {
         get
         {
-            lock (_sync) return new GatewayStatus(_state, _facility?.Id, _message, _client, settings.RelayPort, log.Snapshot());
+            lock (_sync) return new GatewayStatus(_state, _facility?.Id, _message, _client, settings.RelayPort, log.Snapshot(), _routes);
         }
     }
 
@@ -77,7 +84,7 @@ public sealed class ConnectionController(
         _attempt = new CancellationTokenSource();
         var request = ++_request;
         var ct = _attempt.Token;
-        (_state, _facility, _client, _message) = (state, target ?? _facility, client, message);
+        (_state, _facility, _client, _message, _routes) = (state, target ?? _facility, client, message, null);
         log.Add($"{message} (asked by {client})");
         _ = Task.Run(() => CarryOutAsync(request, target, ct));
     }
@@ -123,6 +130,9 @@ public sealed class ConnectionController(
             return;
         }
 
+        var learn = !facility.Layer2 && facility.Routes.Count == 0;
+        var before = learn ? VpnRoutes.Snapshot() : [];
+
         _up = facility;
         var code = await connectors.RunAsync(facility, "Connect", ct);
         if (code != 0)
@@ -131,10 +141,10 @@ public sealed class ConnectionController(
             return;
         }
 
+        var deadline = DateTime.UtcNow.AddSeconds(facility.Timeout);
         if (facility.Check is { } check)
         {
             Set(request, ConnectionState.Connecting, $"Waiting for {check} to answer. Sign in on the gateway if the VPN client asks.");
-            var deadline = DateTime.UtcNow.AddSeconds(facility.Timeout);
             while (!await Probe.TcpAsync(check, ct))
             {
                 if (DateTime.UtcNow >= deadline)
@@ -146,8 +156,43 @@ public sealed class ConnectionController(
             }
         }
 
+        var routes = facility.Routes;
+        if (learn)
+        {
+            Set(request, ConnectionState.Connecting, "Waiting for the networks its VPN sets up. Sign in on the gateway if the VPN client asks.");
+            routes = await LearnRoutesAsync(before, deadline, ct);
+            if (routes.Count == 0)
+            {
+                await FailAsync(request,
+                    $"{facility.Name}'s VPN set up no networks on this gateway within {facility.Timeout} s. Give the facility its routes in the facility editor.");
+                return;
+            }
+            log.Add($"{facility.Name}'s VPN set up {string.Join(", ", routes)}");
+        }
+
+        lock (_sync)
+        {
+            if (request == _request) _routes = facility.Layer2 ? null : routes;
+        }
         OpenWayIn(facility);
         Set(request, ConnectionState.Connected, $"Connected to {facility.Name}");
+    }
+
+    /// <summary>
+    /// The networks the VPN has added since <paramref name="before"/>, once they hold still: a VPN
+    /// client adds its routes a few seconds after it connects, and not always all at once.
+    /// </summary>
+    private static async Task<List<string>> LearnRoutesAsync(IReadOnlyList<VpnRoutes.Route> before, DateTime deadline, CancellationToken ct)
+    {
+        List<string> last = [];
+        while (true)
+        {
+            var now = VpnRoutes.Added(before, VpnRoutes.Snapshot());
+            if (now.Count > 0 && now.SequenceEqual(last)) return now;
+            if (DateTime.UtcNow >= deadline) return now;
+            last = now;
+            await Task.Delay(RoutesPoll, ct);
+        }
     }
 
     private async Task FailAsync(int request, string message)
@@ -159,8 +204,10 @@ public sealed class ConnectionController(
     /// <summary>How clients reach a connected facility: the relay for a routed one, the Layer 2 port for a bridged one.</summary>
     private void OpenWayIn(Facility facility)
     {
+        IReadOnlyList<string> routes;
+        lock (_sync) routes = _routes ?? facility.Routes;
         if (facility.Layer2) layer2.Open();
-        else relay.Open(facility);
+        else relay.Open(facility, routes);
     }
 
     private void CloseWayIn()
@@ -200,6 +247,7 @@ public sealed class ConnectionController(
         {
             if (request != _request) return;
             (_state, _message) = (state, message);
+            if (state is ConnectionState.Disconnected or ConnectionState.Failed) _routes = null;
             if (state == ConnectionState.Disconnected) _facility = null;
         }
         log.Add(message);

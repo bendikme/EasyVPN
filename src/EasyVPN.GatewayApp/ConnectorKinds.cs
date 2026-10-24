@@ -46,9 +46,11 @@ public static class ConnectorKinds
             "An .ovpn profile, run by OpenVPN 2.6 or later. A Sophos SSL VPN profile is an OpenVPN profile too.",
             true,
             [
-                new("config", "Profile", "The .ovpn file. It is copied into the gateway's own folder, where only administrators can change it.",
+                new("config", "Profile", "The .ovpn file. It is copied into the gateway's own folder, where only administrators can change it, and read for its networks.",
                     FieldKind.File, Required: true, Filter: "OpenVPN profiles (*.ovpn;*.conf)|*.ovpn;*.conf|All files (*.*)|*.*"),
                 User,
+                new("legacy", "Allow old certificates", "Signed with SHA1, or with RSA keys under 2048 bits: OpenVPN 2.6 refuses them otherwise. Ticked by itself for a profile that has them; better still, the customer makes new ones.",
+                    FieldKind.Flag),
             ]),
         new("sophos", "Sophos Connect",
             "Sophos Connect, through its command line sccli: for IPsec (.scx) and provisioning (.pro) files, which only it takes.",
