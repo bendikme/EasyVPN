@@ -27,6 +27,17 @@ public sealed class AgentClient
         using var _ = await SendAsync(HttpMethod.Put, "settings", JsonContent.Create(update, options: Defaults.Json));
     }
 
+    public async Task<UpdateStatus> CheckUpdatesAsync()
+    {
+        using var response = await SendAsync(HttpMethod.Post, "update/check");
+        return await response.Content.ReadFromJsonAsync<UpdateStatus>(Defaults.Json) ?? throw new AgentException("The agent sent an empty answer.");
+    }
+
+    public async Task InstallUpdateAsync()
+    {
+        using var _ = await SendAsync(HttpMethod.Post, "update/install");
+    }
+
     public async Task ConnectAsync(string id)
     {
         using var _ = await SendAsync(HttpMethod.Post, $"connect/{Uri.EscapeDataString(id)}");

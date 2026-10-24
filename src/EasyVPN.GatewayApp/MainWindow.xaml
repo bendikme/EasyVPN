@@ -223,6 +223,19 @@
                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,22,0,6" Text="THIS GATEWAY" />
                     <Border Style="{StaticResource CardBorderStyle}" Padding="16,12">
                         <StackPanel>
+                            <DockPanel Margin="0,2,0,8" Visibility="{Binding Update, Converter={StaticResource Visible}}">
+                                <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding UpdateLevel}" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding VersionText}" FontWeight="SemiBold" />
+                                    <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding UpdateText}" />
+                                    <Button Margin="0,8,0,0"
+                                            HorizontalAlignment="Left"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Content="{Binding UpdateButtonText}"
+                                            IsEnabled="{Binding CanUpdate}"
+                                            Click="OnUpdateClick" />
+                                </StackPanel>
+                            </DockPanel>
                             <TextBlock Foreground="{DynamicResource TextMutedBrush}" Text="Checking…" Visibility="{Binding SystemChecks, Converter={StaticResource Visible}, ConverterParameter=invert}" />
                             <ItemsControl ItemsSource="{Binding SystemChecks}">
                                 <ItemsControl.ItemTemplate>

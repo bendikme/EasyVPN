@@ -61,6 +61,15 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true) await _model.ReloadAsync();
     }
 
+    private void OnUpdateClick(object sender, RoutedEventArgs e)
+    {
+        if (_model.CanInstallUpdate && _model.IsBusy && MessageBox.Show(this,
+                "Installing the update disconnects this PC from the facility, and EasyVPN restarts. Install it now?",
+                "EasyVPN", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+        _model.UpdateCommand.Execute(null);
+    }
+
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
 
     private void OnMaximizeClick(object sender, RoutedEventArgs e)

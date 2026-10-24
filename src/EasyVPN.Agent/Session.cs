@@ -48,6 +48,15 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         }
     }
 
+    /// <summary>Nothing connected or being connected: an update would cut nothing off.</summary>
+    public bool IsIdle
+    {
+        get
+        {
+            lock (_sync) return _wanted is null && _carried is null;
+        }
+    }
+
     public AgentSettingsView Settings
     {
         get

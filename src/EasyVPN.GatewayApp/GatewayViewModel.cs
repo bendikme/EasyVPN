@@ -25,6 +25,7 @@ public sealed class GatewayViewModel : ObservableObject
     private bool _checking;
     private DateTime _checked = DateTime.MinValue;
     private string _facilities = "";
+    private bool _updating;
 
     public GatewayViewModel(LocalGateway gateway)
     {
@@ -38,8 +39,12 @@ public sealed class GatewayViewModel : ObservableObject
         EditFacilitiesCommand = new RelayCommand(() => Elevated.Start("notepad.exe", $"\"{_overview?.FacilitiesFile}\""));
         StartServiceCommand = new RelayCommand(() =>
             Elevated.Start("powershell.exe", "-NoProfile -WindowStyle Hidden -Command Start-Service EasyVPN.Gateway", hidden: true));
+        UpdateCommand = new AsyncRelayCommand(() => ActAsync(CanInstallUpdate ? _gateway.InstallUpdateAsync : _gateway.CheckUpdatesAsync));
         _timer.Tick += async (_, _) => await PollAsync();
     }
+
+    /// <summary>The service is about to install an update, which replaces this app too.</summary>
+    public event Action? UpdateInstalling;
 
     public AsyncRelayCommand ConnectCommand { get; }
     public AsyncRelayCommand DisconnectCommand { get; }
@@ -49,6 +54,9 @@ public sealed class GatewayViewModel : ObservableObject
     public RelayCommand ShowAccessKeyCommand { get; }
     public RelayCommand EditFacilitiesCommand { get; }
     public RelayCommand StartServiceCommand { get; }
+
+    /// <summary>Installs the newer version found, or else looks for one.</summary>
+    public AsyncRelayCommand UpdateCommand { get; }
 
     public ObservableCollection<FacilityRow> Facilities { get; } = [];
 
@@ -113,6 +121,39 @@ public sealed class GatewayViewModel : ObservableObject
 
     public string Thumbprint => _overview?.Thumbprint ?? "";
 
+    // ---------------------------------------------------------------- updates
+
+    public UpdateStatus? Update => _overview?.Update;
+
+    public bool CanInstallUpdate => Update is { State: UpdateState.Available or UpdateState.Failed, Latest: not null } update
+        && Version.TryParse(update.Latest, out var latest) && Version.TryParse(update.Current, out var current) && latest > current;
+
+    public string UpdateText => Update switch
+    {
+        null => "",
+        { State: UpdateState.Checking } => "Looking for updates…",
+        { State: UpdateState.Available, Automatic: true } u => $"EasyVPN {u.Latest} is available. It installs by itself when no facility is connected.",
+        { State: UpdateState.Available } u => $"EasyVPN {u.Latest} is available.",
+        { State: UpdateState.Downloading } u => $"Downloading EasyVPN {u.Latest}…",
+        { State: UpdateState.Installing } u => $"Installing EasyVPN {u.Latest}: the gateway and this app restart.",
+        { State: UpdateState.Failed } u => u.Message ?? "The update failed.",
+        { State: UpdateState.UpToDate } => "Up to date.",
+        var u => u.Message ?? "",
+    };
+
+    public string VersionText => Update is { } u ? $"Version {u.Current}" : "";
+
+    public string UpdateButtonText => CanInstallUpdate ? $"Install {Update!.Latest}" : "Check for updates";
+
+    public bool CanUpdate => _serviceOnline && Update is { State: not (UpdateState.Checking or UpdateState.Downloading or UpdateState.Installing) };
+
+    public CheckLevel UpdateLevel => Update?.State switch
+    {
+        UpdateState.UpToDate => CheckLevel.Ok,
+        UpdateState.Failed => CheckLevel.Problem,
+        _ => CheckLevel.Warning,
+    };
+
     // ---------------------------------------------------------------- checks
 
     public bool Checking => _checking;
@@ -167,8 +208,14 @@ public sealed class GatewayViewModel : ObservableObject
                 _serviceOnline = !ex.ServiceDown;
                 if (!ex.ServiceDown) Error = ex.Message;
             }
-            var changed = Update();
+            var changed = Refresh();
             OnPropertyChanged(string.Empty);
+
+            if (_overview?.Update?.State == UpdateState.Installing && !_updating)
+            {
+                _updating = true;
+                UpdateInstalling?.Invoke();
+            }
 
             if (_serviceOnline && (changed || DateTime.Now - _checked > ChecksEvery)) _ = CheckAsync();
         }
@@ -180,7 +227,7 @@ public sealed class GatewayViewModel : ObservableObject
 
     /// <summary>The facility list follows the service's, keeping each one's last check.</summary>
     /// <returns>True when the facilities changed, and so are worth checking again.</returns>
-    private bool Update()
+    private bool Refresh()
     {
         var facilities = _overview?.Facilities ?? [];
         var json = JsonSerializer.Serialize(facilities, Defaults.Json);

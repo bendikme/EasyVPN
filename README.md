@@ -144,6 +144,30 @@ by double-clicking, it starts the new one again afterwards.
 removes it again. They use the same folders and services as the installers, so remove one kind
 before installing the other.
 
+## Updates
+
+The gateway and each workstation keep themselves up to date from this repository's GitHub
+releases. The service (SYSTEM) looks for a newer release a minute after it starts and then every
+six hours. It downloads that release's installer for itself into its data folder, which only SYSTEM
+and administrators can write, checks it against the release's `SHA256SUMS.txt`, and installs it
+silently. The installer replaces the service and starts the new one; the app closes a few seconds
+before and opens again by itself once the service is back, as it was (in the notification area, or
+with its window open).
+
+- **Automatically** only while nothing is connected: on a workstation, no facility; on the gateway,
+  no facility for anyone. Otherwise it waits, trying again every quarter of an hour.
+- **By hand:** the workstation app's status strip and the gateway app's *This gateway* card show
+  the version and a button, *Check for updates*, which turns into *Install 1.2.3* when there is
+  one. Installing by hand while connected asks first, since it disconnects.
+- `updates.json` in the service's data folder (`%ProgramData%\EasyVPN\Client` or `\Gateway`) turns
+  the automatic part off, or points at another repository:
+  `{ "automatic": false, "repository": "owner/name" }`. The button still works.
+- Installs from 0.2.1 and earlier do not update themselves: install the first release with updates
+  once by hand. A development build (not running as the installed service) never updates.
+- The installers are not code-signed, so an update is only as trustworthy as the GitHub account
+  that publishes it: anyone who can publish a release here can run code as SYSTEM on every
+  machine. Protect that account with two-factor authentication.
+
 ## Facilities
 
 `facilities.json` on the gateway; `src\EasyVPN.Gateway\facilities.sample.json` has one of each kind.

@@ -35,4 +35,14 @@ public partial class MainWindow : Window
     }
 
     private void OnEncryptPasswordClick(object sender, RoutedEventArgs e) => new PasswordWindow { Owner = this }.ShowDialog();
+
+    private void OnUpdateClick(object sender, RoutedEventArgs e)
+    {
+        var model = (GatewayViewModel)DataContext;
+        if (model.CanInstallUpdate && model.IsBusy && MessageBox.Show(this,
+                "Installing the update disconnects the facility for every workstation, and the gateway restarts. Install it now?",
+                "EasyVPN Gateway", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+        model.UpdateCommand.Execute(null);
+    }
 }

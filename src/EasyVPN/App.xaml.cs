@@ -34,6 +34,11 @@ public partial class App : Application
         var model = new MainViewModel(agent, UserSettings.Load());
         _window = new MainWindow(model, agent);
         _tray = new TrayIcon(model, ShowWindow, Quit);
+        model.UpdateInstalling += () =>
+        {
+            UpdateRestart.Schedule("EasyVPN.Agent", showWindow: _window.IsVisible);
+            Quit();
+        };
         if (!e.Args.Contains("--tray")) ShowWindow();
         model.Start();
     }

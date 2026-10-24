@@ -31,6 +31,16 @@ public sealed class LocalGateway
         using var _ = await SendAsync(HttpMethod.Post, "disconnect");
     }
 
+    public async Task CheckUpdatesAsync()
+    {
+        using var _ = await SendAsync(HttpMethod.Post, "update/check");
+    }
+
+    public async Task InstallUpdateAsync()
+    {
+        using var _ = await SendAsync(HttpMethod.Post, "update/install");
+    }
+
     public async Task AddLayer2AdapterAsync()
     {
         using var _ = await SendAsync(HttpMethod.Post, "layer2");

@@ -41,6 +41,11 @@ public partial class App : Application
         var model = new GatewayViewModel(new LocalGateway());
         _window = new MainWindow(model);
         _tray = new TrayIcon(model, ShowWindow, Quit);
+        model.UpdateInstalling += () =>
+        {
+            UpdateRestart.Schedule("EasyVPN.Gateway", showWindow: _window.IsVisible);
+            Quit();
+        };
         if (!e.Args.Contains("--tray")) ShowWindow();
         model.Start();
     }

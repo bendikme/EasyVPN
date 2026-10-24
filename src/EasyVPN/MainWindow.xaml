@@ -578,7 +578,7 @@
         </Grid>
 
         <!-- ============================================================
-             Status strip: the gateway and the tunnel
+             Status strip: the gateway, the tunnel and updates
              ============================================================ -->
         <Border Grid.Row="2"
                 Padding="14,5"
@@ -587,9 +587,24 @@
                 BorderThickness="0,1,0,0">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Right"
+                           VerticalAlignment="Center"
                            Text="{Binding TunnelText}"
                            FontSize="{StaticResource FontSizeSmall}"
                            Foreground="{DynamicResource TextMutedBrush}" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock VerticalAlignment="Center"
+                               Text="{Binding UpdateText}"
+                               FontSize="{StaticResource FontSizeSmall}"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+                    <Button Margin="8,0,0,0"
+                            Padding="6,1"
+                            MinHeight="0"
+                            Style="{StaticResource SubtleButtonStyle}"
+                            FontSize="{StaticResource FontSizeSmall}"
+                            Content="{Binding UpdateButtonText}"
+                            IsEnabled="{Binding CanUpdate}"
+                            Click="OnUpdateClick" />
+                </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center">
                         <Ellipse.Style>

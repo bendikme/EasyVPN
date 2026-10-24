@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using EasyVPN;
 using EasyVPN.Agent;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
 // The agent runs as a Windows service (SYSTEM, which the adapter, routes and DNS rules need) and
 // is driven by the EasyVPN app over a local API. Started from a console it runs there instead.
@@ -30,6 +31,13 @@ builder.Services.AddSingleton<Tunnel>();
 builder.Services.AddSingleton<Layer2Link>();
 builder.Services.AddSingleton<Session>();
 builder.Services.AddHostedService(services => services.GetRequiredService<Session>());
+// Only the installed service updates itself, and by itself only while nothing is connected.
+builder.Services.AddSingleton(services => new Updater(
+    "Client",
+    AgentSettings.Folder,
+    () => services.GetRequiredService<Session>().IsIdle,
+    services.GetRequiredService<RecentLog>(),
+    WindowsServiceHelpers.IsWindowsService()));
 
 var app = builder.Build();
 
@@ -43,7 +51,9 @@ app.Use((context, next) =>
 });
 
 var api = app.MapGroup("/api");
-api.MapGet("/status", (Session session) => session.Status);
+api.MapGet("/status", (Session session, Updater updater) => session.Status with { Update = updater.Status });
+api.MapPost("/update/check", (Updater updater, CancellationToken ct) => updater.CheckNowAsync(ct));
+api.MapPost("/update/install", (Updater updater) => updater.InstallNow());
 api.MapGet("/settings", (Session session) => session.Settings);
 api.MapPut("/settings", (AgentSettingsUpdate update, Session session) => session.UpdateSettings(update));
 api.MapGet("/facilities", (Session session, CancellationToken ct) => Gateway(session, async () => Results.Ok(await session.FacilitiesAsync(ct))));
@@ -58,6 +68,7 @@ api.MapPost("/disconnect", (Session session, CancellationToken ct) => Gateway(se
     return Results.NoContent();
 }));
 
+app.Services.GetRequiredService<Updater>().Start(app.Lifetime.ApplicationStopping);
 app.Run();
 return 0;
 

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using EasyVPN;
 using EasyVPN.Gateway;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
 // EasyVPN.Gateway.exe           runs the gateway: as the Windows service, or in a console to try it out
 // EasyVPN.Gateway.exe info      prints what a client needs to connect
@@ -49,6 +50,13 @@ builder.Services.AddSingleton<Layer2Port>();
 builder.Services.AddSingleton<GatewayChecks>();
 builder.Services.AddSingleton<ConnectionController>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ConnectionController>());
+// Only the installed service updates itself, and by itself only while no facility is connected.
+builder.Services.AddSingleton(services => new Updater(
+    "Gateway",
+    GatewaySettings.Folder,
+    () => services.GetRequiredService<ConnectionController>().Status.State is ConnectionState.Disconnected or ConnectionState.Failed,
+    services.GetRequiredService<RecentLog>(),
+    WindowsServiceHelpers.IsWindowsService()));
 
 var app = builder.Build();
 
@@ -88,7 +96,7 @@ api.MapPost("/disconnect", (HttpRequest request, ConnectionController controller
 
 var desktop = $"{Environment.MachineName} (gateway desktop)";
 var local = app.MapGroup("/local");
-local.MapGet("/overview", (ConnectionController controller, FacilityCatalog catalog) => new GatewayOverview(
+local.MapGet("/overview", (ConnectionController controller, FacilityCatalog catalog, Updater updater) => new GatewayOverview(
     controller.Status,
     Environment.MachineName,
     Addresses(),
@@ -96,7 +104,10 @@ local.MapGet("/overview", (ConnectionController controller, FacilityCatalog cata
     certificate.Thumbprint,
     [.. catalog.All().Select(f => f.ToInfo())],
     catalog.Problems,
-    catalog.FilePath));
+    catalog.FilePath,
+    updater.Status));
+local.MapPost("/update/check", (Updater updater, CancellationToken ct) => updater.CheckNowAsync(ct));
+local.MapPost("/update/install", (Updater updater) => updater.InstallNow());
 local.MapGet("/checks", (GatewayChecks checks, CancellationToken ct) => checks.RunAsync(ct));
 local.MapPost("/connect/{id}", (string id, ConnectionController controller) =>
     controller.Connect(id, desktop) ? Results.NoContent() : Results.NotFound());
@@ -119,6 +130,7 @@ local.MapPost("/layer2", async (RecentLog log, CancellationToken ct) =>
     }
 });
 
+app.Services.GetRequiredService<Updater>().Start(app.Lifetime.ApplicationStopping);
 app.Run();
 return 0;
 

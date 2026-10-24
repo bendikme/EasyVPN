@@ -25,6 +25,7 @@ public sealed class MainViewModel : ObservableObject
     private string? _error;
     private DateTime _loaded = DateTime.MinValue;
     private bool _polling;
+    private bool _updating;
 
     public MainViewModel(AgentClient agent, UserSettings user)
     {
@@ -44,6 +45,7 @@ public sealed class MainViewModel : ObservableObject
         OpenLinkCommand = new RelayCommand(p => Try(() => Launcher.Open(((FacilityLink)p!).Url)));
         OpenGatewayDesktopCommand = new RelayCommand(() => Try(() => Launcher.RemoteDesktop(GatewayHost)));
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
+        UpdateCommand = new AsyncRelayCommand(UpdateAsync);
 
         _timer.Tick += async (_, _) => await PollAsync();
     }
@@ -60,6 +62,12 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand OpenLinkCommand { get; }
     public RelayCommand OpenGatewayDesktopCommand { get; }
     public RelayCommand ClearSearchCommand { get; }
+
+    /// <summary>Installs the newer version found, or else looks for one.</summary>
+    public AsyncRelayCommand UpdateCommand { get; }
+
+    /// <summary>The agent is about to install an update, which replaces this app too.</summary>
+    public event Action? UpdateInstalling;
 
     public string SearchText
     {
@@ -164,6 +172,29 @@ public sealed class MainViewModel : ObservableObject
 
     public string TunnelText => _status?.TunnelUp == true ? "Tunnel up" : "Tunnel down";
 
+    // ---------------------------------------------------------------- updates
+
+    public UpdateStatus? Update => _status?.Update;
+
+    public bool CanInstallUpdate => Update is { State: UpdateState.Available or UpdateState.Failed, Latest: not null } update
+        && Version.TryParse(update.Latest, out var latest) && Version.TryParse(update.Current, out var current) && latest > current;
+
+    public string UpdateText => Update switch
+    {
+        null => "",
+        { State: UpdateState.Checking } => "Looking for updates…",
+        { State: UpdateState.Available } u => $"EasyVPN {u.Latest} is available",
+        { State: UpdateState.Downloading } u => $"Downloading EasyVPN {u.Latest}…",
+        { State: UpdateState.Installing } u => $"Installing EasyVPN {u.Latest}…",
+        { State: UpdateState.Failed } u => u.Message ?? "The update failed",
+        { State: UpdateState.UpToDate } u => $"Version {u.Current}, up to date",
+        var u => u.Message ?? $"Version {u.Current}",
+    };
+
+    public string UpdateButtonText => CanInstallUpdate ? $"Install {Update!.Latest}" : "Check for updates";
+
+    public bool CanUpdate => _agentOnline && Update is { State: not (UpdateState.Checking or UpdateState.Downloading or UpdateState.Installing) };
+
     public string TrayText => State switch
     {
         _ when !_agentOnline => "EasyVPN: the agent service is not running",
@@ -204,6 +235,12 @@ public sealed class MainViewModel : ObservableObject
             {
                 _status = null;
                 _agentOnline = false;
+            }
+
+            if (_status?.Update?.State == UpdateState.Installing && !_updating)
+            {
+                _updating = true;
+                UpdateInstalling?.Invoke();
             }
 
             var due = DateTime.UtcNow - _loaded > (Facilities.Count == 0 ? TimeSpan.FromSeconds(10) : FacilityRefresh);
@@ -249,6 +286,13 @@ public sealed class MainViewModel : ObservableObject
     private async Task DisconnectAsync()
     {
         await Try(_agent.DisconnectAsync);
+        await PollAsync();
+    }
+
+    private async Task UpdateAsync()
+    {
+        if (CanInstallUpdate) await Try(_agent.InstallUpdateAsync);
+        else await Try(() => _agent.CheckUpdatesAsync());
         await PollAsync();
     }
 

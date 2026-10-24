@@ -61,7 +61,33 @@ public sealed record GatewayOverview(
     string Thumbprint,
     IReadOnlyList<FacilityInfo> Facilities,
     IReadOnlyList<string> FacilityProblems,
-    string FacilitiesFile);
+    string FacilitiesFile,
+    UpdateStatus? Update = null);
+
+public enum UpdateState
+{
+    /// <summary>Not looked yet, or a development build that does not update itself.</summary>
+    Unknown,
+    Checking,
+    UpToDate,
+    Available,
+    Downloading,
+    /// <summary>The installer is about to run: the apps start a watcher that brings them back, and exit.</summary>
+    Installing,
+    Failed,
+}
+
+/// <summary>
+/// Where a service is with updating itself from the GitHub releases. <see cref="Automatic"/>: it
+/// installs a newer version by itself when nothing is connected.
+/// </summary>
+public sealed record UpdateStatus(
+    string Current,
+    UpdateState State,
+    string? Latest = null,
+    string? Message = null,
+    DateTimeOffset? Checked = null,
+    bool Automatic = true);
 
 public enum CheckLevel
 {
@@ -96,7 +122,8 @@ public sealed record AgentStatus(
     bool Configured,
     bool GatewayOnline,
     bool TunnelUp,
-    IReadOnlyList<LogLine> Log);
+    IReadOnlyList<LogLine> Log,
+    UpdateStatus? Update = null);
 
 public sealed record AgentSettingsView(string? Gateway, bool HasAccessKey, string? Thumbprint);
 
