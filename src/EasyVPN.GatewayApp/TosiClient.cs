@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -79,12 +80,12 @@ public static partial class TosiClient
             say("Tosi Client is not running on this desktop.");
             return NotHere;
         }
-        Bring(handle);
+        Front(handle);
         var window = AutomationElement.FromHandle(handle);
         var search = SearchBox(window);
         try
         {
-            var row = Find(window, search, name);
+            var row = Find(handle, window, search, name);
             if (row is null)
             {
                 say($"Tosi Client lists no Lock called '{name}'.");
@@ -111,7 +112,7 @@ public static partial class TosiClient
             while (DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(1000);
-                row = Find(window, search, name, research: false) ?? row;
+                row = Find(handle, window, search, name, research: false) ?? row;
                 state = Read(window, row);
                 if (state.Connected == connect)
                 {
@@ -125,21 +126,36 @@ public static partial class TosiClient
         finally
         {
             // Leave the list as a person left it.
-            if (search is not null) TryEnter(search, "");
+            if (search is not null) Enter(handle, search, "");
         }
     }
 
     /// <summary>Starts the client, or brings a running one out of the notification area, and waits for its window.</summary>
     private static bool Start(Action<string> say)
     {
-        var program = Program();
-        if (program is null)
+        var set = Environment.GetEnvironmentVariable("EASYVPN_PROGRAM");
+        if (set is { Length: > 0 } && !File.Exists(set))
         {
-            say("Tosi Client is not running, and is not among the installed programs: give the facility its program (the client's .exe).");
+            say($"Tosi Client is not running, and its program is set to {set}, which is not there.");
             return false;
         }
+        var program = set is { Length: > 0 } ? set : Program();
+        if (program is null)
+        {
+            say("Tosi Client is not running, and was not found to start: not among the installed programs, the programs started with Windows, the Start menu or Program Files. Give the facility Tosi Client's program (its .exe).");
+            return false;
+        }
+
         say($"Starting Tosi Client ({program}).");
-        Process.Start(new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(program) })?.Dispose();
+        try
+        {
+            Process.Start(new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(program) })?.Dispose();
+        }
+        catch (Win32Exception ex)
+        {
+            say($"Tosi Client could not be started: {ex.Message}");
+            return false;
+        }
         if (!WaitUntil(() => FindWindow(MainTitle()) != IntPtr.Zero || FindWindow(PasswordTitle()) != IntPtr.Zero, TimeSpan.FromSeconds(45)))
         {
             say("Tosi Client was started, but showed no window within 45 s.");
@@ -149,29 +165,90 @@ public static partial class TosiClient
         return true;
     }
 
-    /// <summary>The client's program: the one set, or the installed one, as Windows' list of programs has it.</summary>
+    /// <summary>
+    /// The client's program, wherever Windows keeps track of it: a copy running elsewhere, the
+    /// programs started with Windows, App Paths, the list of installed programs, the Start menu
+    /// (a shortcut starts it as well as its program), and Program Files.
+    /// </summary>
     private static string? Program()
     {
-        if (Environment.GetEnvironmentVariable("EASYVPN_PROGRAM") is { Length: > 0 } set) return File.Exists(set) ? set : null;
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    if (Product().IsMatch(process.ProcessName) && Client(process.MainModule?.FileName ?? "") is { } running) return running;
+                }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+                {
+                    // Not ours to look at.
+                }
+            }
+        }
 
-        foreach (var (hive, view) in new[] { (RegistryHive.LocalMachine, RegistryView.Registry64), (RegistryHive.LocalMachine, RegistryView.Registry32), (RegistryHive.CurrentUser, RegistryView.Default) })
+        foreach (var (hive, view) in Registries())
         {
             using var root = RegistryKey.OpenBaseKey(hive, view);
+            using (var run = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"))
+                foreach (var value in run?.GetValueNames() ?? [])
+                    if (run!.GetValue(value) is string command && (Product().IsMatch(value) || Product().IsMatch(command)) && Client(ExeOf(command)) is { } started)
+                        return started;
+
+            using (var paths = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"))
+                foreach (var key in paths?.GetSubKeyNames() ?? [])
+                {
+                    using var entry = paths!.OpenSubKey(key);
+                    if (entry?.GetValue(null) is string path && (Product().IsMatch(key) || Product().IsMatch(path)) && Client(path.Trim('"')) is { } registered)
+                        return registered;
+                }
+
             using var programs = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
             foreach (var key in programs?.GetSubKeyNames() ?? [])
             {
                 using var entry = programs!.OpenSubKey(key);
                 if (entry?.GetValue("DisplayName") is not string name || !Product().IsMatch(name)) continue;
                 if (entry.GetValue("DisplayIcon") is string icon && Client(icon.Split(',')[0].Trim().Trim('"')) is { } fromIcon) return fromIcon;
-                if (entry.GetValue("InstallLocation") is not string folder || !Directory.Exists(folder)) continue;
-                // Its folder may hold other programs too (OpenVPN, for one): the one named for the client, or the only one.
-                var found = Directory.EnumerateFiles(folder, "*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 1 })
-                    .Select(Client).OfType<string>().ToList();
-                if ((found.FirstOrDefault(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p))) ?? (found.Count == 1 ? found[0] : null)) is { } inFolder)
-                    return inFolder;
+                foreach (var folder in new[] { entry.GetValue("InstallLocation") as string, Path.GetDirectoryName(ExeOf(entry.GetValue("UninstallString") as string ?? "")) })
+                    if (ClientIn(folder) is { } inFolder) return inFolder;
             }
         }
+
+        foreach (var menu in new[] { Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.Programs })
+        {
+            var folder = Environment.GetFolderPath(menu);
+            if (!Directory.Exists(folder)) continue;
+            if (Directory.EnumerateFiles(folder, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                    .FirstOrDefault(l => Product().IsMatch(Path.GetFileNameWithoutExtension(l)) && !NotTheClient().IsMatch(Path.GetFileName(l))) is { } shortcut)
+                return shortcut;
+        }
+
+        foreach (var root in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 }
+                     .Select(Environment.GetFolderPath)
+                     .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"))
+                     .Where(Directory.Exists))
+            foreach (var folder in Directory.EnumerateDirectories(root, "*", new EnumerationOptions { IgnoreInaccessible = true }).Where(d => Product().IsMatch(Path.GetFileName(d))))
+                if (ClientIn(folder) is { } inProgramFiles)
+                    return inProgramFiles;
         return null;
+    }
+
+    private static (RegistryHive, RegistryView)[] Registries() =>
+        [(RegistryHive.LocalMachine, RegistryView.Registry64), (RegistryHive.LocalMachine, RegistryView.Registry32), (RegistryHive.CurrentUser, RegistryView.Default)];
+
+    /// <summary>The program a command line starts: quoted, or up to the first .exe.</summary>
+    private static string ExeOf(string command) =>
+        Regex.Match(command.Trim(), "^\"([^\"]+)\"|^(.+?\\.exe)", RegexOptions.IgnoreCase) is { Success: true } m
+            ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
+            : command.Trim();
+
+    /// <summary>The client in a folder that may hold other programs too (OpenVPN, for one): the one named for it, or the only one.</summary>
+    private static string? ClientIn(string? folder)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
+        var found = Directory.EnumerateFiles(folder, "*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 1, IgnoreInaccessible = true })
+            .Select(Client).OfType<string>().ToList();
+        return found.FirstOrDefault(p => ClientName().IsMatch(Path.GetFileNameWithoutExtension(p))) ?? (found.Count == 1 ? found[0] : null);
     }
 
     /// <summary>The path, when it is the client itself rather than its uninstaller, updater or service.</summary>
@@ -191,16 +268,25 @@ public static partial class TosiClient
             return false;
         }
 
-        Bring(handle);
         var dialog = AutomationElement.FromHandle(handle);
         var box = dialog.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
-        if (box is null || !TryEnter(box, password))
+        if (box is null || Enter(handle, box, password) is not { } typed)
         {
             say("Tosi Client's password window has no box that can be typed in.");
             code = 1;
             return false;
         }
+
+        // Its OK button waits for the password to be typed: it stays off for text put in any other way.
         var ok = Buttons(dialog).FirstOrDefault(b => Is(b, "OK"));
+        if (ok is not null && !WaitUntil(() => ok.Current.IsEnabled, TimeSpan.FromSeconds(3)))
+        {
+            say(typed
+                ? "Tosi Client kept its OK button off after the password was typed in."
+                : "Tosi Client's password window could not be brought to the front to type in, and its OK button waits for typing: the gateway's desktop must be on and unlocked.");
+            code = 1;
+            return false;
+        }
         if (ok is not null) Press(ok);
         else PressKey(0x0D); // Enter
 
@@ -218,14 +304,14 @@ public static partial class TosiClient
     /// The Lock's row: searched for by its whole name, then by the part in brackets and the part
     /// before them, then in the whole list, as the client's search may match only some of it.
     /// </summary>
-    private static AutomationElement? Find(AutomationElement window, AutomationElement? search, string name, bool research = true)
+    private static AutomationElement? Find(IntPtr handle, AutomationElement window, AutomationElement? search, string name, bool research = true)
     {
         if (search is null || !research) return Row(window, name);
         var brackets = Regex.Match(name, @"^(.*?)\s*\[(.+)\]\s*$");
         string[] terms = brackets.Success ? [name, brackets.Groups[2].Value, brackets.Groups[1].Value, ""] : [name, ""];
         foreach (var term in terms.Distinct())
         {
-            if (!TryEnter(search, term)) return Row(window, name);
+            if (Enter(handle, search, term) is null) return Row(window, name);
             AutomationElement? row = null;
             if (WaitUntil(() => (row = Row(window, name)) is not null, TimeSpan.FromSeconds(3))) return row;
         }
@@ -304,33 +390,45 @@ public static partial class TosiClient
 
     private static bool Is(AutomationElement e, string name) => string.Equals(e.Current.Name.Trim(), name, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Puts text in a box: through UI Automation, or by typing it into the focused box.</summary>
-    private static bool TryEnter(AutomationElement box, string text)
+    /// <summary>
+    /// Puts text in a box as a person does - the window in front, the box focused, the text typed -
+    /// as the client reacts to typing alone (its OK button, its search). Typed only once the window
+    /// is in front, so nothing lands anywhere else; otherwise put there through UI Automation.
+    /// </summary>
+    /// <returns>True when typed, false when put there otherwise, null when neither would do.</returns>
+    private static bool? Enter(IntPtr window, AutomationElement box, string text)
     {
+        try
+        {
+            if (Front(window))
+            {
+                box.SetFocus();
+                if (GetForegroundWindow() == window)
+                {
+                    SelectAll();
+                    PressKey(0x08); // Backspace
+                    Type(text);
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
+        {
+            // The desktop takes no typing (locked, or a disconnected Remote Desktop): the other way.
+        }
         try
         {
             if (box.TryGetCurrentPattern(ValuePattern.Pattern, out var value) && !((ValuePattern)value).Current.IsReadOnly)
             {
                 ((ValuePattern)value).SetValue(text);
-                return true;
+                return false;
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or ElementNotEnabledException or COMException)
         {
-            // Password boxes often refuse it; typing does not.
+            // Nor this.
         }
-        try
-        {
-            box.SetFocus();
-            SelectAll();
-            PressKey(0x08); // Backspace
-            Type(text);
-            return true;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
-        {
-            return false;
-        }
+        return null;
     }
 
     private static bool WaitUntil(Func<bool> done, TimeSpan within)
@@ -413,12 +511,32 @@ public static partial class TosiClient
         return found;
     }
 
-    /// <summary>Shown, restored and in front, so the client lays out its list and takes input.</summary>
-    private static void Bring(IntPtr handle)
+    /// <summary>
+    /// Shown, restored and in front, so the client lays out its list and takes typing. Windows lets
+    /// only the program in front give the front away, so this borrows its input for a moment.
+    /// </summary>
+    /// <returns>True when the window is in front.</returns>
+    private static bool Front(IntPtr handle)
     {
         if (!IsWindowVisible(handle) || IsIconic(handle)) ShowWindow(handle, 9 /* SW_RESTORE */);
-        SetForegroundWindow(handle);
-        Thread.Sleep(300);
+        var foreground = GetForegroundWindow();
+        if (foreground != handle)
+        {
+            var theirs = GetWindowThreadProcessId(foreground, IntPtr.Zero);
+            var ours = GetCurrentThreadId();
+            var attached = theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true);
+            try
+            {
+                BringWindowToTop(handle);
+                SetForegroundWindow(handle);
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(ours, theirs, false);
+            }
+            Thread.Sleep(300);
+        }
+        return GetForegroundWindow() == handle;
     }
 
     private static void Click(Point at)
@@ -498,6 +616,21 @@ public static partial class TosiClient
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr handle, IntPtr processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint to, bool on);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
