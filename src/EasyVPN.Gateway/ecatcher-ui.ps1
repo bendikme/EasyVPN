@@ -120,25 +120,11 @@ public static class JavaBridge
         public int accessibleComponent, accessibleAction, accessibleSelection, accessibleText, accessibleInterfaces;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ActionInfo
-    {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string name;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ActionList
-    {
-        public int count;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public ActionInfo[] actions;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ActionsToDo
-    {
-        public int count;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public ActionInfo[] actions;
-    }
+    // AccessibleActions (256 names) and AccessibleActionsToDo (32): a count, then names of 256
+    // characters each. Too large for the marshaller, so they are laid out in memory by hand.
+    private const int NameChars = 256;
+    private const int ActionsSize = 4 + 256 * NameChars * 2;
+    private const int ActionsToDoSize = 4 + 32 * NameChars * 2;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct TextInfo
@@ -163,8 +149,8 @@ public static class JavaBridge
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern long getAccessibleChildFromContext(int vm, long context, int index);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern void releaseJavaObject(int vm, long item);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] private static extern int setTextContents(int vm, long context, string text);
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] private static extern int getAccessibleActions(int vm, long context, ref ActionList actions);
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] private static extern int doAccessibleActions(int vm, long context, ref ActionsToDo actions, out int failure);
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern int getAccessibleActions(int vm, long context, IntPtr actions);
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern int doAccessibleActions(int vm, long context, IntPtr actions, out int failure);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern int getAccessibleTextInfo(int vm, long context, out TextInfo info, int x, int y);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] private static extern int getAccessibleTextRange(int vm, long context, int start, int end, StringBuilder text, short length);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] private static extern void addAccessibleSelectionFromContext(int vm, long context, int index);
@@ -280,12 +266,44 @@ public static class JavaBridge
     /// <summary>Does what the element does when used: a button's press, a check box's tick.</summary>
     public static bool Act(JavaNode node)
     {
-        var list = new ActionList { actions = new ActionInfo[256] };
-        if (getAccessibleActions(node.Vm, node.Context, ref list) == 0 || list.count == 0) return false;
-        var todo = new ActionsToDo { count = 1, actions = new ActionInfo[32] };
-        todo.actions[0].name = list.actions[0].name;
-        int failure;
-        return doAccessibleActions(node.Vm, node.Context, ref todo, out failure) != 0;
+        var name = FirstAction(node);
+        if (name == null) return false;
+        var todo = Marshal.AllocHGlobal(ActionsToDoSize);
+        try
+        {
+            ZeroMemory(todo, ActionsToDoSize);
+            Marshal.WriteInt32(todo, 1);
+            var chars = name.ToCharArray(0, Math.Min(name.Length, NameChars - 1));
+            Marshal.Copy(chars, 0, todo + 4, chars.Length);
+            int failure;
+            return doAccessibleActions(node.Vm, node.Context, todo, out failure) != 0;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(todo);
+        }
+    }
+
+    /// <summary>The name of what the element does first (its "click"), in the Java program's own language.</summary>
+    public static string FirstAction(JavaNode node)
+    {
+        var list = Marshal.AllocHGlobal(ActionsSize);
+        try
+        {
+            ZeroMemory(list, ActionsSize);
+            if (getAccessibleActions(node.Vm, node.Context, list) == 0 || Marshal.ReadInt32(list) <= 0) return null;
+            var name = Marshal.PtrToStringUni(list + 4);
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(list);
+        }
+    }
+
+    private static void ZeroMemory(IntPtr memory, int size)
+    {
+        Marshal.Copy(new byte[size], 0, memory, size);
     }
 
     public static bool SetText(JavaNode node, string text)
@@ -444,36 +462,68 @@ function Close-Dialog {
     $dialog.Text
 }
 
-function Wait-Until([scriptblock]$condition, [int]$seconds) {
-    $until = (Get-Date).AddSeconds($seconds)
-    while ((Get-Date) -lt $until) {
+# Waits for $condition to hold. A long wait says every 15 s that it is still waiting ("for …"),
+# so whoever asked sees something happen.
+function Wait-Until([scriptblock]$condition, [int]$seconds, [string]$waiting) {
+    $began = Get-Date
+    $told = $began
+    while ((Get-Date) -lt $began.AddSeconds($seconds)) {
         [JavaBridge]::Pump(700)
         $result = & $condition
         if ($result) { return $result }
+        if ($waiting -and ((Get-Date) - $told).TotalSeconds -ge 15) {
+            $told = Get-Date
+            Say ("Still waiting {0} ({1:0} s)." -f $waiting, ($told - $began).TotalSeconds)
+        }
     }
     $null
 }
 
 # ---------------------------------------------------------------- doing it
 
-function Sign-In {
+# The sign-in box beside a label ("Username:"), or $null.
+function Find-Field($nodes, [string]$label) {
+    $text = Find-Node $nodes 'label' $label
+    if (-not $text) { return $null }
+    @($nodes | Where-Object {
+            $_.Role -in 'text', 'password text' -and $_.Has('editable') -and $_.Has('showing') -and $_.X -gt $text.X -and
+            [math]::Abs(($_.Y + $_.Height / 2) - ($text.Y + $text.Height / 2)) -lt 15 })[0]
+}
+
+# Puts text in a sign-in box, and reads it back once eCatcher has had a moment: it fills in the
+# user it remembers for an account once the account is put in, which can undo a user put there
+# just before. A password box does not say what it holds, so it is taken as it is.
+function Set-Field([string]$label, [string]$value) {
+    for ($try = 0; $try -lt 4; $try++) {
+        $field = Find-Field (Read-Frame) $label
+        if (-not $field) { throw "eCatcher's sign-in shows no $($label.TrimEnd(':')) box." }
+        [void][JavaBridge]::SetText($field, $value)
+        [JavaBridge]::Pump(700)
+        $field = Find-Field (Read-Frame) $label
+        if ($field.Role -eq 'password text' -or [JavaBridge]::Text($field) -eq $value) { return }
+    }
+    throw "eCatcher's $($label.TrimEnd(':')) box would not keep what was put in it."
+}
+
+function Test-Field([string]$label, [string]$value) {
+    $field = Find-Field (Read-Frame) $label
+    $field -and [JavaBridge]::Text($field) -eq $value
+}
+
+function Connect-Talk2M {
     $account, $user = $env:EASYVPN_ACCOUNT, $env:EASYVPN_USER
     if (-not $account -or -not $user) {
         throw 'eCatcher asks to sign in to Talk2M: set the facility''s account and user (there, or in the gateway app''s Settings), and its password.'
     }
-    $nodes = Read-Frame
-    $fields = @($nodes | Where-Object { $_.Role -in 'text', 'password text' -and $_.Has('editable') -and $_.Has('showing') })
-    foreach ($pair in @(@('Account:', $account), @('Username:', $user), @('Password:', $env:EASYVPN_PASSWORD))) {
-        $label = Find-Node $nodes 'label' $pair[0]
-        $field = if ($label) {
-            @($fields | Where-Object { [math]::Abs(($_.Y + $_.Height / 2) - ($label.Y + $label.Height / 2)) -lt 15 -and $_.X -gt $label.X })[0]
-        }
-        if (-not $field) { throw "eCatcher's sign-in shows no $($pair[0].TrimEnd(':')) box." }
-        # A password eCatcher remembers stays, when the facility has none.
-        if ($pair[0] -eq 'Password:' -and -not $pair[1]) { continue }
-        if (-not [JavaBridge]::SetText($field, $pair[1])) { throw "eCatcher's $($pair[0].TrimEnd(':')) box could not be filled in." }
-    }
-    $logIn = Find-Node $nodes 'push button' 'Log In'
+    Set-Field 'Account:' $account
+    Set-Field 'Username:' $user
+    # A password eCatcher remembers stays, when the facility has none.
+    if ($env:EASYVPN_PASSWORD) { Set-Field 'Password:' $env:EASYVPN_PASSWORD }
+    # Each box filled may have redone another: all as they should be, just before signing in.
+    if (-not (Test-Field 'Account:' $account)) { Set-Field 'Account:' $account }
+    if (-not (Test-Field 'Username:' $user)) { Set-Field 'Username:' $user }
+
+    $logIn = Find-Node (Read-Frame) 'push button' 'Log In'
     if (-not $logIn -or -not [JavaBridge]::Act($logIn)) { throw 'eCatcher''s Log In could not be pressed.' }
     Say "Signing in to Talk2M as $user (account $account)."
 
@@ -481,7 +531,7 @@ function Sign-In {
         $now = Get-View (Read-Frame)
         if ($now -ne 'login') { return $now }
         if (Get-Dialogs) { return 'dialog' }
-    } 60
+    } 60 "for Talk2M to sign $user in"
     if ($view -eq 'main') { Say 'Signed in to Talk2M.'; return }
     if ($view -eq 'dialog') { throw "eCatcher did not sign in: $(Close-Dialog)" }
     if (-not $view) { throw "eCatcher did not sign in within 60 s. It shows: $(Labels (Read-Frame))" }
@@ -534,7 +584,7 @@ function Skip-Logbook {
 function Connect([string]$ewon) {
     $view = Get-View (Read-Frame)
     Assert-View $view
-    if ($view -ne 'main') { Sign-In }
+    if ($view -ne 'main') { Connect-Talk2M }
 
     $selected = Select-Ewon $ewon
     if (-not $selected -and $env:EASYVPN_ACCOUNT) {
@@ -542,7 +592,7 @@ function Connect([string]$ewon) {
         Say "eCatcher lists no Ewon called $ewon; signing in again, to the facility's account."
         Stop-Ecatcher
         $script:frame = Start-Ecatcher
-        Sign-In
+        Connect-Talk2M
         $selected = Select-Ewon $ewon
     }
     if (-not $selected) {
@@ -561,8 +611,20 @@ function Connect([string]$ewon) {
     $done = Wait-Until {
         $now = Read-Frame
         if ((Find-ActionButton $now).Name -eq 'Disconnect' -or (Test-Connected $now)) { return 'connected' }
-        if (Get-Dialogs) { return 'dialog' }
-    } 120
+        foreach ($dialog in @(Get-Dialogs)) {
+            # The gateway is eCatcher's only user: an Ewon it has connected already goes.
+            if ($dialog.Text -match 'disconnect|already connected|active connection') {
+                $yes = @($dialog.Buttons | Where-Object { $_.Name -match '^(yes|ok|continue|connect|disconnect)$' })[0]
+                if ($yes) {
+                    [void][JavaBridge]::Act($yes)
+                    Say "eCatcher asked: $($dialog.Text) Answered $($yes.Name), as the gateway is its only user."
+                    continue
+                }
+            }
+            if ($dialog.Text -match 'log ?book|message') { Skip-Logbook; continue }
+            return 'dialog'
+        }
+    } 120 "for eCatcher to connect $ewon"
     if ($done -eq 'connected') { Say "eCatcher has connected $ewon."; return }
     if ($done -eq 'dialog') { throw "eCatcher did not connect ${ewon}: $(Close-Dialog)" }
     throw "eCatcher did not show $ewon connected within 120 s. It shows: $(Labels (Read-Frame))"
@@ -590,7 +652,7 @@ function Disconnect([string]$ewon) {
     $done = Wait-Until {
         Skip-Logbook
         if (Find-Node (Read-Frame) 'label' 'No active connection.') { return $true }
-    } 45
+    } 45 "for eCatcher to disconnect $ewon"
     if (-not $done) { throw "eCatcher did not show the connection ended within 45 s. It shows: $(Labels (Read-Frame))" }
     Say "eCatcher has disconnected $ewon."
 }

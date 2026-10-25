@@ -23,8 +23,9 @@ public sealed class Connectors(RecentLog log)
     private DateTime _sharedLoaded;
     private SharedSettings _shared = new();
 
+    /// <param name="progress">Told each line the script prints, as it prints it.</param>
     /// <returns>The script's exit code: 0 for success.</returns>
-    public async Task<int> RunAsync(Facility facility, string action, CancellationToken ct)
+    public async Task<int> RunAsync(Facility facility, string action, CancellationToken ct, Action<string>? progress = null)
     {
         var script = Find(facility.Connector);
         if (script is null)
@@ -38,7 +39,11 @@ public sealed class Connectors(RecentLog log)
         if (!string.IsNullOrEmpty(password))
             environment["EASYVPN_PASSWORD"] = Secret.Reveal(password);
 
-        return await PowerShell.RunFileAsync(script, [action], environment, Limit, line => log.Add($"{facility.Connector}: {line}"), ct);
+        return await PowerShell.RunFileAsync(script, [action], environment, Limit, line =>
+        {
+            log.Add($"{facility.Connector}: {line}");
+            progress?.Invoke(line);
+        }, ct);
     }
 
     public async Task<CheckResult> CheckAsync(Facility facility, CancellationToken ct)

@@ -45,10 +45,12 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   routed to it, and which DNS names go to the facility's DNS servers (via the Name Resolution
   Policy Table, so the PC's own DNS is untouched). Both adapters are made with a fixed identity, so
   Windows keeps seeing the same network on them, and the workstation's stays named `EasyVPN`
-  rather than `EasyVPN 2`, `EasyVPN 3` … after each update.
+  rather than `EasyVPN 2`, `EasyVPN 3` … after each update. TIA Portal and Device Manager list it
+  as *Dynatec EasyVPN*.
 - **Connected means verified.** The gateway calls a facility connected when its VPN client says so
   and its check, if it has one, answers from the gateway; the agent when the workstation reaches the
-  gateway's relay, and the check through the tunnel.
+  gateway's relay, and the check through the tunnel. Meanwhile the app shows each step as it
+  happens - what the connector does, and every 15 s that it is still waiting for a VPN client.
 - **It fails closed.** If a facility with a check stops answering, the gateway stops sharing its VPN
   until it answers again, so traffic stops rather than going some other way. The workstation keeps its
   routes until you disconnect. Connecting another facility is refused while the previous one still
@@ -274,7 +276,12 @@ copy of it left on another desktop, where nobody could use it and it would keep 
 starting; then it types its password (from *Settings*, or the facility's own) and waits for the
 list to fill. It finds the Lock with the client's search, which filters the list to it and so
 keeps it in view whoever scrolls (or else scrolled to, or typed into the list), presses Connect or
-Disconnect (Cancel, for one still connecting), and waits until the client shows it. The app drives
+Disconnect (Cancel, for one still connecting), and waits until the client shows it. The gateway
+is the client's only user: before a Lock connects, any other the client has connected is
+disconnected, and after it disconnects, none is left connected. For that the app reads the whole
+list (scrolled through, when the client shows UI Automation only the rows in view), and counts a
+Lock as connected only on plain signs - its devices listed, a Disconnect, Connected or Connecting -
+never a blank status alone, so it never presses one that is not into connecting. The app drives
 the client through UI Automation where it allows, and otherwise with the mouse and keyboard, as a
 person would: typing needs that session's screen on and unlocked. Give each facility the Lock's name exactly
 as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes` empty unless the Lock

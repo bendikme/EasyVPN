@@ -143,7 +143,7 @@ public sealed class ConnectionController(
         var before = learn ? VpnRoutes.Snapshot() : [];
 
         _up = facility;
-        var code = await connectors.RunAsync(facility, "Connect", ct);
+        var code = await connectors.RunAsync(facility, "Connect", ct, line => Progress(request, line));
         if (code != 0)
         {
             await FailAsync(request, $"The {facility.Connector} connector failed (exit code {code})");
@@ -183,6 +183,7 @@ public sealed class ConnectionController(
         {
             if (request == _request) _routes = facility.Layer2 ? null : routes;
         }
+        if (!facility.Layer2) Set(request, ConnectionState.Connecting, $"Sharing {facility.Name}'s VPN with the workstations");
         try
         {
             await OpenWayInAsync(facility, ct);
@@ -255,7 +256,7 @@ public sealed class ConnectionController(
         await CloseWayInAsync();
         if (_up is not { } facility) return true;
 
-        await connectors.RunAsync(facility, "Disconnect", CancellationToken.None);
+        await connectors.RunAsync(facility, "Disconnect", CancellationToken.None, line => Progress(request, line));
         if (facility.Check is { } check)
         {
             var deadline = DateTime.UtcNow + CleanupWait;
@@ -272,6 +273,20 @@ public sealed class ConnectionController(
         }
         _up = null;
         return true;
+    }
+
+    /// <summary>
+    /// What a connector says while it works, as the state's message - so whoever asked sees it
+    /// getting on - without logging it again. A line that only introduces the next ("On …'s
+    /// desktop:") is left out.
+    /// </summary>
+    private void Progress(int request, string line)
+    {
+        if (line.EndsWith(':')) return;
+        lock (_sync)
+        {
+            if (request == _request && _state is ConnectionState.Connecting or ConnectionState.Disconnecting) _message = line;
+        }
     }
 
     private void Set(int request, ConnectionState state, string message)

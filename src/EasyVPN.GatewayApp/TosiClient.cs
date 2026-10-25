@@ -35,6 +35,8 @@ public static partial class TosiClient
     // A Lock can take a while; the gateway gives the whole connector longer than this.
     private static readonly TimeSpan Connecting = TimeSpan.FromSeconds(150);
     private static readonly TimeSpan ListFills = TimeSpan.FromSeconds(45);
+    // How often a long wait says it is still waiting, so whoever asked sees something happen.
+    private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(15);
 
     public static string DumpPath { get; } = Path.Combine(Path.GetDirectoryName(CrashLog.Path)!, "tosi-client.txt");
 
@@ -82,15 +84,30 @@ public static partial class TosiClient
         }
         Front(handle);
         var window = AutomationElement.FromHandle(handle);
-        var search = (AutomationElement?)null;
-        try
+        // Just signed in, the client takes a while to fill its list.
+        if (!Look(window).Any(Listed))
         {
-            // Just signed in, the client takes a while to fill its list.
+            say("Waiting for Tosi Client to list its Locks.");
             if (!WaitUntil(() => Look(window).Any(Listed), ListFills))
             {
                 say($"Tosi Client showed no list of Locks within {ListFills.TotalSeconds:0} s.{Saved(window)}");
                 return 1;
             }
+        }
+
+        // The gateway is Tosi Client's only user: no Lock but the facility's stays connected - none
+        // before it connects, none after it disconnects.
+        if (connect) DisconnectOthers(handle, window, name, say);
+        var result = SwitchOne(handle, window, name, connect, say);
+        if (!connect) DisconnectOthers(handle, window, null, say);
+        return result;
+    }
+
+    private static int SwitchOne(IntPtr handle, AutomationElement window, string name, bool connect, Action<string> say)
+    {
+        var search = (AutomationElement?)null;
+        try
+        {
             var row = Locate(handle, window, name, ref search, say);
             if (row is null)
             {
@@ -164,10 +181,18 @@ public static partial class TosiClient
 
             // Done when the client says so: its button turns, its status follows. Its list changes
             // meanwhile (a connected Lock shows its devices), so a moment it cannot be read is skipped.
-            var deadline = DateTime.UtcNow + (connect ? Connecting : Settle);
+            var began = DateTime.UtcNow;
+            var deadline = began + (connect ? Connecting : Settle);
+            var told = began;
+            var lastStatus = state.Status;
             while (DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(1000);
+                if (DateTime.UtcNow - told >= Heartbeat)
+                {
+                    told = DateTime.UtcNow;
+                    say($"Still waiting for Tosi Client to {(connect ? "connect" : "disconnect")} {name} ({(told - began).TotalSeconds:0} s).");
+                }
                 try
                 {
                     var seen = Look(window);
@@ -185,6 +210,12 @@ public static partial class TosiClient
                         say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
                         return 0;
                     }
+                    if (state.Status != lastStatus)
+                    {
+                        lastStatus = state.Status;
+                        told = DateTime.UtcNow;
+                        say($"Tosi Client shows {name}: {state.Status}");
+                    }
                 }
                 catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
                 {
@@ -199,6 +230,178 @@ public static partial class TosiClient
             // Leave the list as a person left it.
             if (search is not null) Enter(handle, search, "");
         }
+    }
+
+    // ---------------------------------------------------------------- the only user
+
+    /// <summary>
+    /// Disconnects every Lock the client has connected but <paramref name="keep"/>. The whole list is
+    /// looked through, at one look or a page at a time, and a Lock counts as connected only on plain signs - its
+    /// devices listed under it, a Disconnect, a status of Connected or Connecting - never a blank
+    /// status alone, so one that is not connected is never pressed into connecting. Each is found
+    /// again with the search, read again, and pressed once.
+    /// </summary>
+    private static void DisconnectOthers(IntPtr handle, AutomationElement window, string? keep, Action<string> say)
+    {
+        say(keep is null
+            ? "Looking through Tosi Client's Locks for any still connected."
+            : "Looking through Tosi Client's Locks for any other connected: the gateway is its only user.");
+        var (count, connected) = ConnectedLocks(handle, window, say);
+        var others = connected.Where(n => !string.Equals(n, keep, StringComparison.OrdinalIgnoreCase)).ToList();
+        say($"Tosi Client lists {count} Locks; {(others.Count > 0 ? $"connected: {string.Join(", ", others)}" : keep is null ? "none is connected" : "no other is connected")}.");
+
+        foreach (var other in others)
+        {
+            AutomationElement? search = null;
+            try
+            {
+                var row = Locate(handle, window, other, ref search, null);
+                var seen = Look(window);
+                if (row is null || Row(seen, other) is not { } line)
+                {
+                    say($"{other} could not be found again in Tosi Client to disconnect it.");
+                    continue;
+                }
+                var state = Read(seen, line);
+                if (!Surely(state)) continue;
+                say($"Disconnecting {other} in Tosi Client ({state.Why}).");
+                Press(handle, seen, line, state);
+                say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false }, Settle)
+                    ? $"Tosi Client has disconnected {other}."
+                    : $"Tosi Client did not show {other} disconnected within {Settle.TotalSeconds:0} s.");
+            }
+            finally
+            {
+                if (search is not null) Enter(handle, search, "");
+            }
+        }
+    }
+
+    /// <summary>Connected, or connecting, by what the client plainly shows.</summary>
+    private static bool Surely(State state) => state.Connecting || (state.Connected && state.Why != Blank);
+
+    /// <summary>How many Locks the client lists, and those it shows connected or connecting.</summary>
+    private static (int Count, List<string> Connected) ConnectedLocks(IntPtr handle, AutomationElement window, Action<string> say)
+    {
+        var seen = Look(window);
+        // The whole list, not what a search left of it.
+        if (SearchBox(seen) is { Value.Length: > 0 } box)
+        {
+            Enter(handle, box.Element, "");
+            Thread.Sleep(800);
+            seen = Look(window);
+        }
+
+        var column = NameColumn(seen);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var connected = new List<string>();
+        void ReadPage(List<Seen> page, bool anywhere = false)
+        {
+            column ??= NameColumn(page);
+            // Each row on every page it shows on: one at the foot of a page shows its devices on the next.
+            foreach (var row in Locks(page, column, anywhere))
+            {
+                var lockName = row.Name.Trim();
+                names.Add(lockName);
+                if (Surely(Read(page, row, anywhere)) && !connected.Contains(lockName, StringComparer.OrdinalIgnoreCase)) connected.Add(lockName);
+            }
+        }
+
+        // A client that tells UI Automation of the rows out of view, where they are, is read from this
+        // one look; only one that tells of the rows in view alone is scrolled through.
+        if (Locks(seen, column, all: true).Any(row => !row.Visible))
+        {
+            ReadPage(seen, anywhere: true);
+            return (names.Count, connected);
+        }
+
+        ReadPage(seen);
+        var scroll = Locks(seen, column).Take(5).Select(row => Scroller(row.Element)).FirstOrDefault(found => found is not null);
+        try
+        {
+            if (scroll is not null)
+            {
+                // A list scrolls a moment after it is told to: each page is waited for.
+                scroll.SetScrollPercent(ScrollPattern.NoScroll, 0);
+                Thread.Sleep(400);
+                for (var page = 0; page < 100; page++)
+                {
+                    ReadPage(Look(window));
+                    var before = scroll.Current.VerticalScrollPercent;
+                    if (before >= 99.5) break;
+                    scroll.ScrollVertical(ScrollAmount.LargeIncrement);
+                    if (!WaitUntil(() => Math.Abs(scroll.Current.VerticalScrollPercent - before) >= 0.01, TimeSpan.FromSeconds(2))) break;
+                    Thread.Sleep(200);
+                }
+                scroll.SetScrollPercent(ScrollPattern.NoScroll, 0);
+            }
+            else
+            {
+                // No scrolling the list as a whole: each row out of view brought into view in turn.
+                foreach (var row in Locks(seen, column, all: true).Where(r => !r.Visible).OrderBy(r => r.Rect.Top))
+                    if (!names.Contains(row.Name.Trim()) && ScrollTo(row.Element)) ReadPage(Look(window));
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
+        {
+            // The list changed while it was scrolled: what was read stands.
+            say($"Looking through Tosi Client's list stopped early: {ex.Message}");
+        }
+        return (names.Count, connected);
+    }
+
+    /// <summary>
+    /// Where the Locks' names are: the first column, told by the rows that say they are not connected
+    /// - the name is the first thing on their line. Null until some row says so.
+    /// </summary>
+    private static double? NameColumn(List<Seen> seen)
+    {
+        var lefts = new List<double>();
+        foreach (var status in seen.Where(s => s.Visible && NotConnected().IsMatch(s.Name)))
+        {
+            var middle = status.Rect.Top + status.Rect.Height / 2;
+            var name = seen
+                .Where(s => s.Visible && s != status && s.Type != ControlType.Edit && s.Name.Trim().Length > 0
+                    && s.Rect.Right <= status.Rect.Left + 2 && Math.Abs(s.Rect.Top + s.Rect.Height / 2 - middle) <= 12)
+                .MinBy(s => s.Rect.Left);
+            if (name is not null) lefts.Add(Math.Round(name.Rect.Left));
+        }
+        return lefts.Count == 0 ? null : lefts.GroupBy(l => l).MaxBy(g => g.Count())!.Key;
+    }
+
+    /// <summary>The Locks' rows: in the name column, and neither a device's address nor a heading.</summary>
+    private static List<Seen> Locks(List<Seen> seen, double? column, bool all = false) =>
+        column is not { } left ? [] :
+        [
+            .. seen.Where(s => (all || s.Visible) && !s.Rect.IsEmpty && Math.Abs(s.Rect.Left - left) <= 4
+                && !NotARow.Contains(s.Type) && s.Name.Trim().Length > 0
+                && !Address().IsMatch(s.Name.Trim()) && !NotConnected().IsMatch(s.Name) && !ConnectButton().IsMatch(s.Name.Trim())
+                && !string.Equals(s.Name.Trim(), "Name", StringComparison.OrdinalIgnoreCase)),
+        ];
+
+    // What sits in the name column without being a row of the list: the window's title, its menus, headings.
+    private static readonly HashSet<ControlType> NotARow =
+    [
+        ControlType.Edit, ControlType.Button, ControlType.TitleBar, ControlType.Window, ControlType.MenuBar, ControlType.Menu,
+        ControlType.MenuItem, ControlType.ToolBar, ControlType.Header, ControlType.HeaderItem, ControlType.StatusBar,
+        ControlType.ScrollBar, ControlType.Thumb, ControlType.Tab, ControlType.TabItem,
+    ];
+
+    /// <summary>What scrolls the list: the nearest parent of a row that scrolls up and down.</summary>
+    private static ScrollPattern? Scroller(AutomationElement row)
+    {
+        var walker = TreeWalker.ControlViewWalker;
+        try
+        {
+            for (var e = walker.GetParent(row); e is not null && e != AutomationElement.RootElement; e = walker.GetParent(e))
+                if (e.TryGetCurrentPattern(ScrollPattern.Pattern, out var pattern) && ((ScrollPattern)pattern).Current.VerticallyScrollable)
+                    return (ScrollPattern)pattern;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
+        {
+            // Gone meanwhile.
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------- starting it
@@ -546,12 +749,15 @@ public static partial class TosiClient
     /// connected; a Cancel, or a status of Connecting, is connecting. A button out of view does not
     /// count - the client may keep the one it replaced.
     /// </summary>
-    private static State Read(List<Seen> seen, Seen row)
+    /// <param name="anywhere">The row and what is on it, by where they are, though out of view.</param>
+    private static State Read(List<Seen> seen, Seen row, bool anywhere = false)
     {
+        bool Here(Seen s) => anywhere ? !s.Rect.IsEmpty : s.Visible;
+
         // The row's own line: an opened row may measure as tall as the devices listed under it.
         var top = row.Rect.Top;
         var bottom = row.Rect.Top + Math.Min(row.Rect.Height, 48);
-        bool OnLine(Seen s) => s.Visible && s.Rect.Top + s.Rect.Height / 2 >= top && s.Rect.Top + s.Rect.Height / 2 <= bottom;
+        bool OnLine(Seen s) => Here(s) && s.Rect.Top + s.Rect.Height / 2 >= top && s.Rect.Top + s.Rect.Height / 2 <= bottom;
 
         var line = seen.Where(OnLine).ToList();
         var labels = line.Select(s => s.Name.Trim()).Where(text => text.Length > 0).ToList();
@@ -569,7 +775,7 @@ public static partial class TosiClient
             .Distinct());
 
         // The Lock's devices, listed under its row (indented, by address) once it is connected.
-        var devices = seen.Count(s => s.Visible && s.Rect.Left > row.Rect.Left + 4
+        var devices = seen.Count(s => Here(s) && s.Rect.Left > row.Rect.Left + 4
             && s.Rect.Top >= bottom - 2 && s.Rect.Top <= bottom + 3 * 48 && Address().IsMatch(s.Name.Trim()));
 
         // Not connected, for sure: the status says so (ready to connect, no Internet connection …).

@@ -3,8 +3,9 @@
     SYSTEM:  network.ps1 Apply | Clear | Prepare
 
     Prepare is for a new adapter, each time gost makes one: NetBIOS off, so Windows' name
-    broadcasts do not try to go through the tunnel; and the network Windows sees on it named
-    EasyVPN, the ones it remembered for earlier adapters gone.
+    broadcasts do not try to go through the tunnel; the adapter called Dynatec EasyVPN where it
+    is listed by its driver or device (TIA Portal, Device Manager); and the network Windows sees on
+    it named EasyVPN, the ones it remembered for earlier adapters gone.
 
     EASYVPN_OLD_ROUTES    routes to remove first, comma separated (what was routed before)
     EASYVPN_ROUTES        the facility's networks, routed to the adapter              (Apply)
@@ -35,6 +36,18 @@ if ($Action -eq 'Prepare') {
     # 2: NetBIOS over TCP/IP off. 0 is done, 1 done after a restart.
     $result = Invoke-CimMethod -InputObject $config -MethodName SetTcpipNetbios -Arguments @{ TcpipNetbiosOptions = [uint32]2 }
     if ($result.ReturnValue -gt 1) { throw "Windows answered $($result.ReturnValue)." }
+
+    # TIA Portal lists the adapter by its driver's description - Wintun's own, "Wintun Userspace
+    # Tunnel" - and Device Manager by its device's name, "GOST Tunnel". Both say EasyVPN instead,
+    # set again each time, as the adapter is made afresh with Wintun's.
+    $title = 'Dynatec EasyVPN'
+    $class = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}'
+    foreach ($key in Get-ChildItem $class -ErrorAction SilentlyContinue) {
+        $id = (Get-ItemProperty $key.PSPath -Name NetCfgInstanceId -ErrorAction SilentlyContinue).NetCfgInstanceId
+        if ($id -eq $nic.InterfaceGuid) { Set-ItemProperty $key.PSPath -Name DriverDesc -Value $title }
+    }
+    $device = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($nic.PnPDeviceID)"
+    if (Test-Path $device) { Set-ItemProperty $device -Name FriendlyName -Value $title }
 
     # Windows names a network it has not seen after its adapter, numbered when the name is taken:
     # "EasyVPN 12" after eleven adapters made with new identities. The adapter keeps one identity
