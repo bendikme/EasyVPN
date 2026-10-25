@@ -15,6 +15,8 @@ namespace EasyVPN.Agent;
 public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : BackgroundService
 {
     private static readonly TimeSpan BusyPoll = TimeSpan.FromSeconds(2);
+    // Asked often while connecting, so a facility is carried here as soon as the gateway has it.
+    private static readonly TimeSpan ConnectingPoll = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan IdlePoll = TimeSpan.FromSeconds(10);
 
     private readonly Lock _sync = new();
@@ -165,11 +167,11 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
                 log.Add(ex.Message);
             }
 
-            bool active;
-            lock (_sync) active = _wanted is not null;
+            TimeSpan pace;
+            lock (_sync) pace = _wanted is null ? IdlePoll : _carried is null ? ConnectingPoll : BusyPoll;
             try
             {
-                await _wake.WaitAsync(active ? BusyPoll : IdlePoll, stop);
+                await _wake.WaitAsync(pace, stop);
             }
             catch (OperationCanceledException)
             {

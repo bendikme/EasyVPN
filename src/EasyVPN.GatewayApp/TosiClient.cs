@@ -72,8 +72,10 @@ public static partial class TosiClient
 
     private static int Switch(string name, bool connect, string? password, bool start, Action<string> say)
     {
+        // Running here with no window - in the notification area - it is brought up here, as it
+        // would be started: whatever it has connected can only be seen, and disconnected, in its window.
         var showing = FindWindow(MainTitle()) != IntPtr.Zero || FindWindow(PasswordTitle()) != IntPtr.Zero;
-        if (!showing && start && !Start(say)) return 1;
+        if (!showing && (start || RunsHere()) && !Start(say)) return 1;
         if (!SignIn(password, say, out var code)) return code;
 
         var handle = FindWindow(MainTitle());
@@ -105,131 +107,124 @@ public static partial class TosiClient
 
     private static int SwitchOne(IntPtr handle, AutomationElement window, string name, bool connect, Action<string> say)
     {
+        // The search is left as it is: it shows the Lock, and whatever looks next sets it as it needs.
         var search = (AutomationElement?)null;
-        try
+        var row = Locate(handle, window, name, ref search, say);
+        if (row is null)
         {
-            var row = Locate(handle, window, name, ref search, say);
-            if (row is null)
-            {
-                say($"Tosi Client lists no Lock called '{name}', or it could not be found in its list.{Saved(window)}");
-                return 1;
-            }
-
-            var state = Read(Look(window), row);
-            say($"Tosi Client shows {name}: {state.Status}{(state.Button is { } shown ? $", with its {shown.Name} button" : ", with no button UI Automation sees")}.");
-            if (state.Connected == connect && !state.Connecting)
-            {
-                say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
-                return 0;
-            }
-            if (connect && state.Connecting)
-                say($"Tosi Client is connecting {name} already.");
-            else if (connect && state.Button is { Enabled: false })
-            {
-                say($"{name} cannot be connected: {state.Status}");
-                return 1;
-            }
-            else
-            {
-                // Disconnecting one still connecting is cancelling it, with whatever its button is then.
-                // A blank status is taken for a connection only when it stays so: the client draws a
-                // connected Lock's status itself, but the list may also be caught mid-redraw.
-                if (!connect && state.Connected && state.Why == Blank)
-                {
-                    Thread.Sleep(1000);
-                    if (Now(window, name) is { Connected: false } recheck)
-                    {
-                        say($"{name} is not connected in Tosi Client.");
-                        return 0;
-                    }
-                }
-
-                var before = state;
-                var clicked = Press(handle, Look(window), row, state);
-                say(connect ? $"Pressed Connect for {name} in Tosi Client{(clicked ? ", with the mouse, as it shows no button UI Automation sees" : "")}."
-                    : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
-                    : $"Pressed Disconnect for {name} in Tosi Client ({state.Why}).");
-
-                // A client may take UI Automation's press and do nothing: when the row has not
-                // changed in a few seconds, the button is clicked as a person would. Never a second
-                // click, though: that would undo the first.
-                if (!clicked && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(6)))
-                {
-                    Front(handle);
-                    var seen = Look(window);
-                    if (Row(seen, name) is { } line && Read(seen, line) is var current && Target(seen, line, current) is { } at)
-                    {
-                        Click(handle, at);
-                        say($"Tosi Client did not take the press, so the button was clicked with the mouse.");
-                    }
-                }
-                // A click that plainly did not take - ten seconds on, the row still says it is ready to
-                // connect, and nothing else has changed - is made once more. Any other change, and it
-                // took: a second click then would undo it.
-                else if (clicked && connect && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(10))
-                         && Now(window, name) is { Connected: false, Connecting: false } still && NotConnected().IsMatch(still.Status))
-                {
-                    Front(handle);
-                    var seen = Look(window);
-                    if (Row(seen, name) is { } line && Target(seen, line, Read(seen, line)) is { } at)
-                    {
-                        Click(handle, at);
-                        say($"Tosi Client still showed {name} ready to connect, so Connect was clicked once more.");
-                    }
-                }
-            }
-
-            // Done when the client says so: its button turns, its status follows. Its list changes
-            // meanwhile (a connected Lock shows its devices), so a moment it cannot be read is skipped.
-            var began = DateTime.UtcNow;
-            var deadline = began + (connect ? Connecting : Settle);
-            var told = began;
-            var lastStatus = state.Status;
-            while (DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(1000);
-                if (DateTime.UtcNow - told >= Heartbeat)
-                {
-                    told = DateTime.UtcNow;
-                    say($"Still waiting for Tosi Client to {(connect ? "connect" : "disconnect")} {name} ({(told - began).TotalSeconds:0} s).");
-                }
-                try
-                {
-                    var seen = Look(window);
-                    // Out of view again (someone scrolled, the list was redrawn): found again.
-                    if (Row(seen, name) is not { } now)
-                    {
-                        if (Locate(handle, window, name, ref search, null) is null) continue;
-                        seen = Look(window);
-                        if (Row(seen, name) is not { } again) continue;
-                        now = again;
-                    }
-                    state = Read(seen, now);
-                    if (state.Connected == connect && !state.Connecting)
-                    {
-                        say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
-                        return 0;
-                    }
-                    if (state.Status != lastStatus)
-                    {
-                        lastStatus = state.Status;
-                        told = DateTime.UtcNow;
-                        say($"Tosi Client shows {name}: {state.Status}");
-                    }
-                }
-                catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
-                {
-                    // Changed while it was read: look again.
-                }
-            }
-            say($"Tosi Client did not show {name} {(connect ? "connected" : "disconnected")} within {(connect ? Connecting : Settle).TotalSeconds:0} s. It says: {state.Status}.{Saved(window)}");
+            say($"Tosi Client lists no Lock called '{name}', or it could not be found in its list.{Saved(window)}");
             return 1;
         }
-        finally
+
+        var state = Read(Look(window), row);
+        say($"Tosi Client shows {name}: {state.Status}{(state.Button is { } shown ? $", with its {shown.Name} button" : ", with no button UI Automation sees")}.");
+        if (state.Connected == connect && !state.Connecting)
         {
-            // Leave the list as a person left it.
-            if (search is not null) Enter(handle, search, "");
+            say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
+            return 0;
         }
+        if (connect && state.Connecting)
+            say($"Tosi Client is connecting {name} already.");
+        else if (connect && state.Button is { Enabled: false })
+        {
+            say($"{name} cannot be connected: {state.Status}");
+            return 1;
+        }
+        else
+        {
+            // Disconnecting one still connecting is cancelling it, with whatever its button is then.
+            // A blank status is taken for a connection only when it stays so: the client draws a
+            // connected Lock's status itself, but the list may also be caught mid-redraw.
+            if (!connect && state.Connected && state.Why == Blank)
+            {
+                Thread.Sleep(1000);
+                if (Now(window, name) is { Connected: false } recheck)
+                {
+                    say($"{name} is not connected in Tosi Client.");
+                    return 0;
+                }
+            }
+
+            var before = state;
+            var clicked = Press(handle, Look(window), row, state);
+            say(connect ? $"Pressed Connect for {name} in Tosi Client{(clicked ? ", with the mouse, as it shows no button UI Automation sees" : "")}."
+                : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
+                : $"Pressed Disconnect for {name} in Tosi Client ({state.Why}).");
+
+            // A client may take UI Automation's press and do nothing: when the row has not
+            // changed in a few seconds, the button is clicked as a person would. Never a second
+            // click, though: that would undo the first.
+            if (!clicked && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(6)))
+            {
+                Front(handle);
+                var seen = Look(window);
+                if (Row(seen, name) is { } line && Read(seen, line) is var current && Target(seen, line, current) is { } at)
+                {
+                    Click(handle, at);
+                    say($"Tosi Client did not take the press, so the button was clicked with the mouse.");
+                }
+            }
+            // A click that plainly did not take - ten seconds on, the row still says it is ready to
+            // connect, and nothing else has changed - is made once more. Any other change, and it
+            // took: a second click then would undo it.
+            else if (clicked && connect && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(10))
+                     && Now(window, name) is { Connected: false, Connecting: false } still && NotConnected().IsMatch(still.Status))
+            {
+                Front(handle);
+                var seen = Look(window);
+                if (Row(seen, name) is { } line && Target(seen, line, Read(seen, line)) is { } at)
+                {
+                    Click(handle, at);
+                    say($"Tosi Client still showed {name} ready to connect, so Connect was clicked once more.");
+                }
+            }
+        }
+
+        // Done when the client says so: its button turns, its status follows. Its list changes
+        // meanwhile (a connected Lock shows its devices), so a moment it cannot be read is skipped.
+        var began = DateTime.UtcNow;
+        var deadline = began + (connect ? Connecting : Settle);
+        var told = began;
+        var lastStatus = state.Status;
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(500);
+            if (DateTime.UtcNow - told >= Heartbeat)
+            {
+                told = DateTime.UtcNow;
+                say($"Still waiting for Tosi Client to {(connect ? "connect" : "disconnect")} {name} ({(told - began).TotalSeconds:0} s).");
+            }
+            try
+            {
+                var seen = Look(window);
+                // Out of view again (someone scrolled, the list was redrawn): found again.
+                if (Row(seen, name) is not { } now)
+                {
+                    if (Locate(handle, window, name, ref search, null) is null) continue;
+                    seen = Look(window);
+                    if (Row(seen, name) is not { } again) continue;
+                    now = again;
+                }
+                state = Read(seen, now);
+                if (state.Connected == connect && !state.Connecting)
+                {
+                    say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
+                    return 0;
+                }
+                if (state.Status != lastStatus)
+                {
+                    lastStatus = state.Status;
+                    told = DateTime.UtcNow;
+                    say($"Tosi Client shows {name}: {state.Status}");
+                }
+            }
+            catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+            {
+                // Changed while it was read: look again.
+            }
+        }
+        say($"Tosi Client did not show {name} {(connect ? "connected" : "disconnected")} within {(connect ? Connecting : Settle).TotalSeconds:0} s. It says: {state.Status}.{Saved(window)}");
+        return 1;
     }
 
     // ---------------------------------------------------------------- the only user
@@ -253,27 +248,20 @@ public static partial class TosiClient
         foreach (var other in others)
         {
             AutomationElement? search = null;
-            try
+            var row = Locate(handle, window, other, ref search, null);
+            var seen = Look(window);
+            if (row is null || Row(seen, other) is not { } line)
             {
-                var row = Locate(handle, window, other, ref search, null);
-                var seen = Look(window);
-                if (row is null || Row(seen, other) is not { } line)
-                {
-                    say($"{other} could not be found again in Tosi Client to disconnect it.");
-                    continue;
-                }
-                var state = Read(seen, line);
-                if (!Surely(state)) continue;
-                say($"Disconnecting {other} in Tosi Client ({state.Why}).");
-                Press(handle, seen, line, state);
-                say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false }, Settle)
-                    ? $"Tosi Client has disconnected {other}."
-                    : $"Tosi Client did not show {other} disconnected within {Settle.TotalSeconds:0} s.");
+                say($"{other} could not be found again in Tosi Client to disconnect it.");
+                continue;
             }
-            finally
-            {
-                if (search is not null) Enter(handle, search, "");
-            }
+            var state = Read(seen, line);
+            if (!Surely(state)) continue;
+            say($"Disconnecting {other} in Tosi Client ({state.Why}).");
+            Press(handle, seen, line, state);
+            say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false }, Settle)
+                ? $"Tosi Client has disconnected {other}."
+                : $"Tosi Client did not show {other} disconnected within {Settle.TotalSeconds:0} s.");
         }
     }
 
@@ -406,6 +394,19 @@ public static partial class TosiClient
 
     // ---------------------------------------------------------------- starting it
 
+    /// <summary>Some part of the client runs in this desktop session: its window, or its agent in the notification area.</summary>
+    private static bool RunsHere()
+    {
+        var session = Process.GetCurrentProcess().SessionId;
+        var found = false;
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+                found |= process.SessionId == session && process.ProcessName.StartsWith("tosi", StringComparison.OrdinalIgnoreCase);
+        }
+        return found;
+    }
+
     /// <summary>Starts the client, or brings a running one out of the notification area, and waits for its window.</summary>
     private static bool Start(Action<string> say)
     {
@@ -439,7 +440,6 @@ public static partial class TosiClient
             say($"{Path.GetFileName(program)} was started, but no Tosi Client window showed within 45 s: if it is not the client, set Tosi Client's program (TosiboxKey.exe) in the gateway app's Settings.");
             return false;
         }
-        Thread.Sleep(1500); // Its list fills in a moment later.
         return true;
     }
 
@@ -655,8 +655,8 @@ public static partial class TosiClient
     private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search, Action<string>? say)
     {
         var seen = Look(window);
-        // Searched for already, and still there.
-        if (search is not null && Row(seen, name) is { } kept) return kept;
+        // In view already - searched for before, by this run or the last: nothing to do.
+        if (Row(seen, name) is { } kept) return kept;
 
         // The client's search first: a list filtered to the Lock stays put, whoever scrolls it.
         if (SearchBox(seen) is { } box)
@@ -870,7 +870,7 @@ public static partial class TosiClient
             // A click focuses the box as surely as a person's, and brings the window to the front
             // with it; UI Automation's focus as well, should the click not get there.
             var r = box.Current.BoundingRectangle;
-            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(window, new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2));
+            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(window, new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2), hover: false);
             if (GetForegroundWindow() != window) Front(window);
             box.SetFocus();
             if (GetForegroundWindow() == window)
@@ -1080,8 +1080,9 @@ public static partial class TosiClient
     /// client that draws its own buttons may take a click only on one it has seen the pointer over -
     /// then a press and, a moment later, a release.
     /// </summary>
+    /// <param name="hover">The pointer kept there a moment first. A box takes a click without it.</param>
     /// <exception cref="InvalidOperationException">Another window is over the window there: no click, as it would land on that.</exception>
-    private static void Click(IntPtr window, Point at)
+    private static void Click(IntPtr window, Point at, bool hover = true)
     {
         // Only ever on the client: brought to the front just before, and the click made only where
         // Windows says it is the window there - otherwise it lands on whatever is in front.
@@ -1094,13 +1095,13 @@ public static partial class TosiClient
                 throw new InvalidOperationException($"Another window is over Tosi Client where it was to be clicked ({at.X:0},{at.Y:0}), so nothing was clicked.");
         }
         SetCursorPos((int)at.X - 3, (int)at.Y);
-        Thread.Sleep(50);
+        Thread.Sleep(hover ? 50 : 20);
         Send(Move(1, 0), Move(1, 0), Move(1, 0)); // arrives, as a hand's would
-        Thread.Sleep(350);
+        Thread.Sleep(hover ? 350 : 30);
         Send(Mouse(0x0002)); // left down
-        Thread.Sleep(90);
+        Thread.Sleep(hover ? 90 : 40);
         Send(Mouse(0x0004)); // left up
-        Thread.Sleep(250);
+        Thread.Sleep(hover ? 250 : 60);
     }
 
     /// <summary>Whether the window at a point on the screen is (part of) <paramref name="window"/>.</summary>
@@ -1120,11 +1121,11 @@ public static partial class TosiClient
 
     private static Input Move(int dx, int dy) => new() { Type = 0, Union = new InputUnion { Mouse = new MouseInput { X = dx, Y = dy, Flags = 0x0001 } } };
 
-    private static void TryClick(IntPtr window, Point at)
+    private static void TryClick(IntPtr window, Point at, bool hover = true)
     {
         try
         {
-            Click(window, at);
+            Click(window, at, hover);
         }
         catch (InvalidOperationException)
         {

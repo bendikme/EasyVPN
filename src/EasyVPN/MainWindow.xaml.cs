@@ -46,8 +46,16 @@ public partial class MainWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
-    private async void OnSettingsClick(object sender, RoutedEventArgs e)
+    private async void OnSettingsClick(object sender, RoutedEventArgs e) => await ShowSettingsAsync();
+
+    /// <summary>Settings, over this window; the one already open, when it is.</summary>
+    public async Task ShowSettingsAsync()
     {
+        if (OwnedWindows.OfType<SettingsWindow>().FirstOrDefault() is { } open)
+        {
+            open.Activate();
+            return;
+        }
         var dialog = new SettingsWindow(_agent) { Owner = this };
         if (dialog.ShowDialog() == true) await _model.ReloadAsync();
     }

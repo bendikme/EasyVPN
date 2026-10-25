@@ -74,7 +74,7 @@ if (-not ((Test-Path $properties) -and ((Get-Content $properties -Raw) -match '(
 }
 
 $env:PATH = "$jre;$env:PATH"
-Add-Type -TypeDefinition @'
+$bridgeCode = @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -170,11 +170,14 @@ public static class JavaBridge
     // Each read holds on to what it reached in the Java program; the oldest reads are let go.
     private static readonly Queue<List<JavaNode>> Reads = new Queue<List<JavaNode>>();
 
-    /// <summary>Starts the bridge. The Java programs answer it with window messages, so it waits on them a while.</summary>
+    /// <summary>
+    /// Starts the bridge. The Java programs answer it with window messages, so whoever looks for
+    /// one next lets those in a while (<see cref="Pump"/>).
+    /// </summary>
     public static void Start()
     {
         Windows_run();
-        Pump(1500);
+        Pump(200);
     }
 
     /// <summary>Lets the bridge's window messages in for a while: it hears of Java programs, and from them, that way.</summary>
@@ -328,6 +331,20 @@ public static class JavaBridge
     }
 }
 '@
+# Compiled the first time, and loaded from there after: compiling takes a second or two each time.
+# Kept where only administrators can write, as this runs with full rights: in the gateway's own
+# folder, which the gateway made so - never made here, where it would not be.
+$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($bridgeCode))).Replace('-', '').Substring(0, 16)
+$gatewayData = Join-Path $env:ProgramData 'EasyVPN\Gateway'
+$compiled = Join-Path $gatewayData "cache\ecatcher-bridge-$hash.dll"
+if ((Test-Path $gatewayData) -and -not (Test-Path $compiled)) {
+    try {
+        New-Item -ItemType Directory -Force (Split-Path $compiled) | Out-Null
+        Add-Type -TypeDefinition $bridgeCode -OutputAssembly $compiled -OutputType Library
+    }
+    catch { Remove-Item $compiled -ErrorAction SilentlyContinue }
+}
+if (Test-Path $compiled) { Add-Type -Path $compiled } else { Add-Type -TypeDefinition $bridgeCode }
 
 # ---------------------------------------------------------------- finding it on this desktop
 
@@ -339,12 +356,17 @@ function Get-Ecatcher([switch]$Elsewhere) {
 }
 
 # The main window, or $null: the bridge reaches it only when eCatcher started with the bridge on.
-function Find-Frame {
-    $ids = [int[]]@(Get-Ecatcher | ForEach-Object Id)
-    if (-not $ids) { return $null }
-    foreach ($window in [JavaBridge]::Windows($ids)) {
-        if ($window.Value -like 'eCatcher*' -and [JavaBridge]::Read($window.Key)) { return $window.Key }
-    }
+# Just started, the bridge takes a moment to hear from eCatcher: it is given up to $seconds.
+function Find-Frame([double]$seconds = 0) {
+    $until = (Get-Date).AddSeconds($seconds)
+    do {
+        $ids = [int[]]@(Get-Ecatcher | ForEach-Object Id)
+        if (-not $ids) { return $null }
+        foreach ($window in [JavaBridge]::Windows($ids)) {
+            if ($window.Value -like 'eCatcher*' -and [JavaBridge]::Read($window.Key)) { return $window.Key }
+        }
+        [JavaBridge]::Pump(150)
+    } while ((Get-Date) -lt $until)
     $null
 }
 
@@ -358,11 +380,12 @@ function Start-Ecatcher {
     Start-Process $program -WorkingDirectory $folder
     $until = (Get-Date).AddSeconds(90)
     while ((Get-Date) -lt $until) {
-        [JavaBridge]::Pump(1000)
+        [JavaBridge]::Pump(300)
         $found = Find-Frame
         if ($found) {
-            # Its views are filled in a moment after the window shows.
-            [JavaBridge]::Pump(3000)
+            # Its views are filled in a moment after the window shows: until it shows one.
+            $script:frame = $found
+            [void](Wait-Until { (Get-View (Read-Frame)) -ne 'unknown' } 15)
             return $found
         }
     }
@@ -468,7 +491,7 @@ function Wait-Until([scriptblock]$condition, [int]$seconds, [string]$waiting) {
     $began = Get-Date
     $told = $began
     while ((Get-Date) -lt $began.AddSeconds($seconds)) {
-        [JavaBridge]::Pump(700)
+        [JavaBridge]::Pump(300)
         $result = & $condition
         if ($result) { return $result }
         if ($waiting -and ((Get-Date) - $told).TotalSeconds -ge 15) {
@@ -498,7 +521,7 @@ function Set-Field([string]$label, [string]$value) {
         $field = Find-Field (Read-Frame) $label
         if (-not $field) { throw "eCatcher's sign-in shows no $($label.TrimEnd(':')) box." }
         [void][JavaBridge]::SetText($field, $value)
-        [JavaBridge]::Pump(700)
+        [JavaBridge]::Pump(400)
         $field = Find-Field (Read-Frame) $label
         if ($field.Role -eq 'password text' -or [JavaBridge]::Text($field) -eq $value) { return }
     }
@@ -660,7 +683,7 @@ function Disconnect([string]$ewon) {
 # ---------------------------------------------------------------- the action
 
 [JavaBridge]::Start()
-$script:frame = Find-Frame
+$script:frame = Find-Frame 2
 $running = (Get-Ecatcher).Count -gt 0
 
 if ($Action -eq 'Dump') {
@@ -692,7 +715,7 @@ if (-not $script:frame) {
 if ([JavaBridge]::IsIconic($script:frame) -or -not [JavaBridge]::Visible($script:frame)) {
     # Shown, so it lays its views out, and says what they show.
     [void][JavaBridge]::ShowWindow($script:frame, 9)
-    [JavaBridge]::Pump(1500)
+    [void](Wait-Until { (Get-View (Read-Frame)) -ne 'unknown' } 5)
 }
 
 $ewon = "$env:EASYVPN_EWON".Trim()

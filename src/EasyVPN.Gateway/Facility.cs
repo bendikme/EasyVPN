@@ -16,6 +16,9 @@ public sealed partial class Facility
     public string Name { get; set; } = "";
     public string Customer { get; set; } = "";
 
+    /// <summary>The folder EasyVPN's lists show it in, nested with '/' (Tosibox/Nord). None: its customer's.</summary>
+    public string? Group { get; set; }
+
     /// <summary>The script in connectors\ that drives the facility's VPN client: manual, windows, openvpn, wireguard, cisco …</summary>
     public string Connector { get; set; } = "manual";
 
@@ -54,7 +57,7 @@ public sealed partial class Facility
     public string? Notes { get; set; }
     public List<FacilityLink> Links { get; set; } = [];
 
-    public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links, Layer2);
+    public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links, Layer2, Group);
 
     /// <summary>What keeps the gateway from using it, worded to follow its name ("… has no routes"); null when nothing does.</summary>
     public string? Problem() => this switch

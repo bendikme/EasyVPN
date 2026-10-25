@@ -24,7 +24,7 @@
 
     <Window.Resources>
         <app:VisibilityConverter x:Key="Visible" />
-        <GridLength x:Key="LogTimeWidth">74</GridLength>
+        <GridLength x:Key="LogTimeWidth">64</GridLength>
 
         <!-- Whether something is ready, as a coloured dot. Put the CheckLevel in Tag. -->
         <Style x:Key="CheckDotStyle" TargetType="Ellipse">
@@ -141,44 +141,22 @@
                     <ColumnDefinition Width="340" />
                 </Grid.ColumnDefinitions>
 
-                <!-- ============================================================ connection and facilities -->
+                <!-- ============================================================ facilities, the one carried among them -->
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="CONNECTION" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,14">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right"
-                                    VerticalAlignment="Top"
-                                    Style="{StaticResource DangerButtonStyle}"
-                                    Content="Disconnect"
-                                    Command="{Binding DisconnectCommand}"
-                                    Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding Headline}" FontSize="{StaticResource FontSizeMedium}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource StatusPillStyle}" Margin="12,0,0,0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Style="{StaticResource StateDotStyle}" Tag="{Binding State}" />
-                                            <TextBlock Text="{Binding StateText}" />
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource Visible}}" />
-                                <TextBlock Style="{StaticResource HintStyle}" Text="{Binding AskedBy}" Visibility="{Binding AskedBy, Converter={StaticResource Visible}}" />
-                            </StackPanel>
-                        </DockPanel>
-                    </Border>
-
-                    <TextBlock Margin="0,10,0,0"
+                    <TextBlock Margin="0,0,0,12"
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource DangerBrush}"
                                Text="{Binding Error}"
                                Visibility="{Binding Error, Converter={StaticResource Visible}}" />
 
-                    <DockPanel Margin="0,22,0,6">
+                    <DockPanel Margin="0,0,0,6">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                             <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding ChecksText}" />
-                            <Button Style="{StaticResource SecondaryButtonStyle}" Content="Encrypt a password…" Click="OnEncryptPasswordClick" />
-                            <Button Margin="8,0,0,0"
+                            <Button Style="{StaticResource SubtleButtonStyle}"
+                                    Content="Encrypt a password…"
+                                    ToolTip="Encrypts a VPN password for writing facilities.json by hand. The facility editor does it by itself."
+                                    Click="OnEncryptPasswordClick" />
+                            <Button Margin="6,0,0,0"
                                     Style="{StaticResource SecondaryButtonStyle}"
                                     Content="Edit facilities…"
                                     ToolTip="Opens the facility editor, as administrator. The gateway uses what is saved there straight away."
@@ -206,14 +184,21 @@
                                 <DataTemplate>
                                     <Border Padding="16,12" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
                                         <DockPanel>
-                                            <Button DockPanel.Dock="Right"
-                                                    Margin="12,0,0,0"
-                                                    VerticalAlignment="Top"
-                                                    Style="{StaticResource SecondaryButtonStyle}"
-                                                    Content="Connect"
-                                                    ToolTip="Connects it from here, as a workstation would: whatever is connected now is disconnected first"
-                                                    Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}" />
+                                            <!-- The one carried: Disconnect. Any other: Connect, which takes it over. -->
+                                            <Grid DockPanel.Dock="Right" Margin="12,0,0,0" VerticalAlignment="Top">
+                                                <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                        MinWidth="96"
+                                                        Content="Connect"
+                                                        ToolTip="Connects it from here, as a workstation would: whatever is connected now is disconnected first"
+                                                        Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Visibility="{Binding IsCarried, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                                                <Button Style="{StaticResource DangerButtonStyle}"
+                                                        MinWidth="96"
+                                                        Content="Disconnect"
+                                                        Command="{Binding DataContext.DisconnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        Visibility="{Binding IsCarried, Converter={StaticResource Visible}}" />
+                                            </Grid>
                                             <Button DockPanel.Dock="Right"
                                                     Margin="8,0,0,0"
                                                     VerticalAlignment="Top"
@@ -222,7 +207,7 @@
                                                     ToolTip="Opens it in the facility editor, as administrator"
                                                     Command="{Binding DataContext.EditFacilitiesCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding}" />
-                                            <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding Level}" />
+                                            <Ellipse DockPanel.Dock="Left" Style="{StaticResource CheckDotStyle}" Tag="{Binding Level}" ToolTip="{Binding ReadinessText}" />
                                             <StackPanel>
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -234,7 +219,9 @@
                                                     </Border>
                                                 </StackPanel>
                                                 <TextBlock Style="{StaticResource HintStyle}" Text="{Binding Details}" />
-                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding ReadinessText}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" Text="{Binding Attention}" Visibility="{Binding Attention, Converter={StaticResource Visible}}" />
+                                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource Visible}}" />
+                                                <TextBlock Style="{StaticResource HintStyle}" Text="{Binding AskedBy}" Visibility="{Binding AskedBy, Converter={StaticResource Visible}}" />
                                             </StackPanel>
                                         </DockPanel>
                                     </Border>
@@ -246,7 +233,8 @@
 
                 <!-- ============================================================ for workstations, the gateway, activity -->
                 <StackPanel Grid.Column="2">
-                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="FOR WORKSTATIONS" />
+                    <!-- Level with the facilities, whose heading shares its line with buttons. -->
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,8,0,15" Text="FOR WORKSTATIONS" />
                     <Border Style="{StaticResource CardBorderStyle}" Padding="16,4,16,14">
                         <StackPanel>
                             <TextBlock Style="{StaticResource LabelStyle}" Text="Gateway address" />
@@ -303,7 +291,7 @@
 
         <!-- ============================================================ activity: a log, oldest first, kept to its own height -->
         <Border Grid.Row="2"
-                Height="230"
+                Height="200"
                 Background="{DynamicResource SurfaceBrush}"
                 BorderBrush="{DynamicResource BorderBrushSoft}"
                 BorderThickness="0,1,0,0">
@@ -316,56 +304,40 @@
                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="ACTIVITY" />
                 </DockPanel>
 
-                <Border BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="1" CornerRadius="{StaticResource RadiusMedium}" Background="{DynamicResource BackgroundBrush}">
-                    <DockPanel>
-                        <!-- Column headings, lined up with the rows below. -->
-                        <Border DockPanel.Dock="Top" Padding="10,5" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
-                            <Grid TextElement.Foreground="{DynamicResource TextMutedBrush}" TextElement.FontSize="{StaticResource FontSizeSmall}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="{StaticResource LogTimeWidth}" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock FontWeight="SemiBold" Text="Time" />
-                                <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Event" />
-                            </Grid>
-                        </Border>
-                        <Grid>
-                            <TextBlock Margin="10,8" Foreground="{DynamicResource TextMutedBrush}" FontSize="{StaticResource FontSizeSmall}" Text="Nothing yet."
-                                       Visibility="{Binding Activity, Converter={StaticResource Visible}, ConverterParameter=invert}" />
-                            <ListBox x:Name="ActivityList"
-                                     Style="{StaticResource AppListBoxStyle}"
-                                     ItemsSource="{Binding Activity}"
-                                     SelectionMode="Extended"
-                                     FontFamily="Consolas"
-                                     FontSize="{StaticResource FontSizeSmall}">
-                                <ListBox.CommandBindings>
-                                    <CommandBinding Command="ApplicationCommands.Copy" Executed="OnCopyActivity" />
-                                </ListBox.CommandBindings>
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
-                                        <Setter Property="MinHeight" Value="0" />
-                                        <Setter Property="Padding" Value="8,2" />
-                                        <Setter Property="VerticalContentAlignment" Value="Top" />
-                                    </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="{StaticResource LogTimeWidth}" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Foreground="{DynamicResource TextMutedBrush}"
-                                                       Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}"
-                                                       ToolTip="{Binding Time.LocalDateTime, StringFormat=dddd d MMMM yyyy HH:mm:ss}" />
-                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </Grid>
-                    </DockPanel>
-                </Border>
+                <Grid>
+                    <TextBlock Margin="0,4" Foreground="{DynamicResource TextMutedBrush}" FontSize="{StaticResource FontSizeSmall}" Text="Nothing yet."
+                               Visibility="{Binding Activity, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                    <ListBox x:Name="ActivityList"
+                             Style="{StaticResource AppListBoxStyle}"
+                             ItemsSource="{Binding Activity}"
+                             SelectionMode="Extended"
+                             FontSize="{StaticResource FontSizeSmall}">
+                        <ListBox.CommandBindings>
+                            <CommandBinding Command="ApplicationCommands.Copy" Executed="OnCopyActivity" />
+                        </ListBox.CommandBindings>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="Padding" Value="6,1" />
+                                <Setter Property="VerticalContentAlignment" Value="Top" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{StaticResource LogTimeWidth}" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Foreground="{DynamicResource TextMutedBrush}"
+                                               Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}"
+                                               ToolTip="{Binding Time.LocalDateTime, StringFormat=dddd d MMMM yyyy HH:mm:ss}" />
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Text}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
             </DockPanel>
         </Border>
 
@@ -393,8 +365,11 @@
                     <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding ProblemText}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center" Style="{StaticResource StateDotStyle}" Tag="{Binding State}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding ConnectionText}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Margin="12,0" Text="·" />
                     <Ellipse x:Name="ServiceDot" Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center" Fill="{DynamicResource SuccessBrush}" />
-                    <TextBlock VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding ServiceText}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding ServiceText}" />
                     <Button Margin="10,0,0,0"
                             Padding="6,1"
                             MinHeight="0"
@@ -404,6 +379,10 @@
                             ToolTip="Asks for administrator rights"
                             Command="{Binding StartServiceCommand}"
                             Visibility="{Binding ServiceOnline, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Margin="12,0" Text="·" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}"
+                               Text="{Binding PortsText}"
+                               ToolTip="The TCP ports workstations reach this gateway on: its API, and the relay their tunnel runs through" />
                 </StackPanel>
             </DockPanel>
         </Border>

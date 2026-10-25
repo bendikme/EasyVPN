@@ -11,6 +11,16 @@
         MinHeight="560"
         WindowStartupLocation="CenterScreen">
 
+    <!-- As the gateway app's own window: no Windows title bar; the strip at the top is the caption,
+         with the window buttons at its right edge (Themes\Chrome.xaml). -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0,0,0,1"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
     <Window.Resources>
         <app:VisibilityConverter x:Key="Visible" />
 
@@ -25,6 +35,16 @@
             <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
             <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         </Style>
+        <!-- A field's hint, shown while the field is being filled in: the field and its hint share a
+             StackPanel of their own. -->
+        <Style x:Key="FieldHintStyle" TargetType="TextBlock" BasedOn="{StaticResource HintStyle}">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=StackPanel}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="FieldStyle" TargetType="TextBox" BasedOn="{StaticResource AppTextBoxStyle}" />
         <Style x:Key="LinesStyle" TargetType="TextBox" BasedOn="{StaticResource AppTextBoxStyle}">
             <Setter Property="AcceptsReturn" Value="True" />
@@ -35,105 +55,129 @@
         <Style x:Key="SectionStyle" TargetType="TextBlock" BasedOn="{StaticResource SectionHeaderStyle}">
             <Setter Property="Margin" Value="0,22,0,6" />
         </Style>
-
-        <!-- Choices laid out as a grid of buttons, with no scrolling of their own inside the form's. -->
-        <Style x:Key="ChoiceListStyle" TargetType="ListBox" BasedOn="{StaticResource AppListBoxStyle}">
-            <Setter Property="ItemsPanel">
-                <Setter.Value>
-                    <ItemsPanelTemplate>
-                        <WrapPanel />
-                    </ItemsPanelTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBox">
-                        <ItemsPresenter />
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="ItemContainerStyle">
-                <Setter.Value>
-                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
-                        <Setter Property="Margin" Value="0,0,6,0" />
-                        <Setter Property="Padding" Value="10,4,12,4" />
-                        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushSoft}" />
-                    </Style>
-                </Setter.Value>
-            </Setter>
-        </Style>
     </Window.Resources>
 
-    <Grid>
+    <Grid x:Name="Root">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="44" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- ============================================================ header -->
+        <!-- ============================================================ title strip -->
         <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
-            <DockPanel Margin="24,14">
-                <Button DockPanel.Dock="Right"
-                        VerticalAlignment="Center"
-                        Style="{StaticResource SubtleButtonStyle}"
-                        Content="Open facilities.json"
-                        ToolTip="{Binding FilePath}"
-                        Command="{Binding OpenFileCommand}" />
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Facilities" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
-                    <TextBlock Margin="0,2,0,0" Foreground="{DynamicResource TextMutedBrush}" Text="What this gateway can connect, one at a time. The gateway uses what you save here straight away." />
+            <Grid Margin="14,0,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <ContentControl Template="{StaticResource BrandMarkTemplate}" Focusable="False" />
+                    <TextBlock Text="Facilities"
+                               Margin="9,0,0,0"
+                               FontSize="{StaticResource FontSizeMedium}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
                 </StackPanel>
-            </DockPanel>
+                <TextBlock Grid.Column="1"
+                           Margin="14,0,12,0"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           FontSize="{StaticResource FontSizeSmall}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           Text="What this gateway can connect, one at a time. It uses what you save here straight away." />
+
+                <Button Grid.Column="2"
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource ToolbarButtonStyle}"
+                        WindowChrome.IsHitTestVisibleInChrome="True"
+                        ToolTip="{Binding FilePath}"
+                        Command="{Binding OpenFileCommand}">
+                    <StackPanel Orientation="Horizontal">
+                        <Viewbox Width="14" Height="14" Margin="0,0,7,0">
+                            <Path Style="{StaticResource ToolbarIconStyle}" Data="{StaticResource GeoEdit}" />
+                        </Viewbox>
+                        <TextBlock Text="Open facilities.json" />
+                    </StackPanel>
+                </Button>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                    <Button Style="{StaticResource CaptionButtonStyle}" Content="&#xE921;" ToolTip="Minimise" Click="OnMinimizeClick" />
+                    <Button Style="{StaticResource CaptionMaximizeButtonStyle}" Click="OnMaximizeClick" />
+                    <Button Style="{StaticResource CaptionCloseButtonStyle}" Content="&#xE8BB;" ToolTip="Close" Click="OnCloseClick" />
+                </StackPanel>
+            </Grid>
         </Border>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- ============================================================ the list -->
-            <Border BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,1,0">
-                <DockPanel Margin="16,16,12,16">
-                    <DockPanel DockPanel.Dock="Top" Margin="4,0,4,8">
-                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding CountText}" />
-                        <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="FACILITIES" />
-                    </DockPanel>
-                    <TextBox DockPanel.Dock="Top"
-                             Margin="4,0,4,10"
-                             Style="{StaticResource FieldStyle}"
+            <DockPanel Background="{DynamicResource SurfaceBrush}">
+                <DockPanel DockPanel.Dock="Top" Margin="16,14,16,8">
+                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding CountText}" />
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="FACILITIES" />
+                </DockPanel>
+
+                <Grid DockPanel.Dock="Top" Margin="12,0,12,8">
+                    <TextBox Style="{StaticResource AppTextBoxStyle}"
+                             Padding="30,5,8,5"
                              ToolTip="Find by name, customer or id"
                              Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" />
-                    <StackPanel DockPanel.Dock="Bottom" Margin="4,10,4,0" Orientation="Horizontal">
-                        <Button Style="{StaticResource SecondaryButtonStyle}" Content="Add" Command="{Binding AddCommand}" ToolTip="A new facility, for the same customer as the one selected" />
-                        <Button Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}" Content="Duplicate" Command="{Binding DuplicateCommand}" ToolTip="A copy of the one selected, password and all: quicker for another site set up the same way" />
-                        <Button Margin="8,0,0,0" Style="{StaticResource SubtleButtonStyle}" Content="Remove" Command="{Binding RemoveCommand}" ToolTip="Gone when you save" />
-                    </StackPanel>
-                    <ListBox Style="{StaticResource AppListBoxStyle}" ItemsSource="{Binding View}" SelectedItem="{Binding Selected}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <DockPanel>
-                                    <Ellipse DockPanel.Dock="Right"
-                                             Width="8"
-                                             Height="8"
-                                             Margin="8,0,0,0"
-                                             Fill="{DynamicResource DangerBrush}"
-                                             ToolTip="{Binding ProblemText}"
-                                             Visibility="{Binding HasProblem, Converter={StaticResource Visible}}" />
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Margin="0,2,0,0" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis" Text="{Binding Subtitle}" />
-                                    </StackPanel>
-                                </DockPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
-            </Border>
+                    <Viewbox Width="13" Height="13" Margin="10,0,0,0" HorizontalAlignment="Left" IsHitTestVisible="False">
+                        <Path Style="{StaticResource IconFrameStyle}"
+                              Data="{StaticResource GeoSearch}"
+                              StrokeThickness="1.7"
+                              StrokeEndLineCap="Round"
+                              Stroke="{DynamicResource TextMutedBrush}" />
+                    </Viewbox>
+                    <TextBlock Margin="31,0,0,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               IsHitTestVisible="False"
+                               Text="Find a facility"
+                               Visibility="{Binding Filter, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                </Grid>
+
+                <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,14" Orientation="Horizontal">
+                    <Button Style="{StaticResource SecondaryButtonStyle}" Content="Add" Command="{Binding AddCommand}" ToolTip="A new facility, for the same customer as the one selected" />
+                    <Button Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}" Content="Duplicate" Command="{Binding DuplicateCommand}" ToolTip="A copy of the one selected, password and all: quicker for another site set up the same way" />
+                    <Button Margin="8,0,0,0" Style="{StaticResource SubtleButtonStyle}" Content="Remove" Command="{Binding RemoveCommand}" ToolTip="Gone when you save" />
+                </StackPanel>
+
+                <ListBox Margin="6,0,4,0" Style="{StaticResource AppListBoxStyle}" ItemsSource="{Binding View}" SelectedItem="{Binding Selected}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <Ellipse DockPanel.Dock="Right"
+                                         Width="8"
+                                         Height="8"
+                                         Margin="8,0,2,0"
+                                         Fill="{DynamicResource DangerBrush}"
+                                         ToolTip="{Binding ProblemText}"
+                                         Visibility="{Binding HasProblem, Converter={StaticResource Visible}}" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Margin="0,1,0,0" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis" Text="{Binding Subtitle}" />
+                                </StackPanel>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <Border Grid.Column="1" Width="1" Background="{DynamicResource BorderBrushSoft}" />
 
             <!-- ============================================================ the facility -->
-            <TextBlock Grid.Column="1"
+            <TextBlock Grid.Column="2"
                        Margin="24"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
@@ -141,12 +185,13 @@
                        Text="Choose a facility, or add one."
                        Visibility="{Binding Selected, Converter={StaticResource Visible}, ConverterParameter=invert}" />
 
-            <ScrollViewer Grid.Column="1"
+            <ScrollViewer Grid.Column="2"
                           Style="{StaticResource AppScrollViewerStyle}"
                           Visibility="{Binding Selected, Converter={StaticResource Visible}}">
-                <StackPanel Margin="24,16,24,24" MaxWidth="760" HorizontalAlignment="Left" DataContext="{Binding Selected}">
+                <StackPanel Margin="28,8,28,24" MaxWidth="760" HorizontalAlignment="Left" DataContext="{Binding Selected}">
 
-                    <Border Padding="14,10"
+                    <Border Margin="0,14,0,0"
+                            Padding="14,10"
                             Background="{DynamicResource DangerSubtleBrush}"
                             CornerRadius="{StaticResource RadiusMedium}"
                             Visibility="{Binding ProblemText, Converter={StaticResource Visible}}">
@@ -155,49 +200,56 @@
 
                     <!-- ======================================== what it is -->
                     <TextBlock Style="{StaticResource SectionStyle}" Text="FACILITY" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,0,16,14">
-                        <StackPanel>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource LabelStyle}" Text="Name" />
-                                    <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Style="{StaticResource LabelStyle}" Text="Customer" />
-                                    <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Customer, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                            </Grid>
-                            <TextBlock Style="{StaticResource LabelStyle}" Text="Id" />
-                            <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding Id, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="Letters, digits, '.', '-' and '_'. A new facility's follows its customer and name until you type one." />
-                        </StackPanel>
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,0,16,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Name" />
+                                <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Customer" />
+                                <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Customer, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1">
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Group (optional)" />
+                                <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Group, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="The folder EasyVPN lists it in on the workstations, nested with '/', such as Tosibox or Tosibox/Nord. Empty: the customer's." />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="2">
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Id" />
+                                <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding Id, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="Letters, digits, '.', '-' and '_'. A new one follows the customer and name until you type one." />
+                            </StackPanel>
+                        </Grid>
                     </Border>
 
                     <!-- ======================================== how the gateway connects it -->
                     <TextBlock Style="{StaticResource SectionStyle}" Text="VPN CLIENT" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,12,16,14">
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,0,16,16">
                         <StackPanel>
-                            <ListBox Style="{StaticResource ChoiceListStyle}"
-                                     ItemsSource="{Binding DataContext.Kinds, RelativeSource={RelativeSource AncestorType=Window}}"
-                                     SelectedItem="{Binding Kind}">
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
-                                        <Setter Property="Margin" Value="0,0,6,6" />
-                                        <Setter Property="Padding" Value="10,4,12,4" />
-                                    </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
+                            <TextBlock Style="{StaticResource LabelStyle}" Text="Client" />
+                            <ComboBox Style="{StaticResource AppComboBoxStyle}"
+                                      MaxWidth="360"
+                                      HorizontalAlignment="Left"
+                                      MinWidth="260"
+                                      ItemsSource="{Binding DataContext.Kinds, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      SelectedItem="{Binding Kind}">
+                                <ComboBox.ItemTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Title}" />
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Kind.Description}" />
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="{StaticResource FontSizeSmall}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Kind.Description}" />
 
                             <ItemsControl ItemsSource="{Binding Fields}" Focusable="False">
                                 <ItemsControl.ItemTemplate>
@@ -219,11 +271,13 @@
                                                       Content="{Binding Field.Label}"
                                                       IsChecked="{Binding IsChecked}"
                                                       Visibility="{Binding IsFlag, Converter={StaticResource Visible}}" />
-                                            <ListBox Style="{StaticResource ChoiceListStyle}"
-                                                     ItemsSource="{Binding Field.Choices}"
-                                                     SelectedItem="{Binding Choice}"
-                                                     Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" />
-                                            <TextBlock Style="{StaticResource HintStyle}" Text="{Binding Field.Hint}" Visibility="{Binding Field.Hint, Converter={StaticResource Visible}}" />
+                                            <ComboBox Style="{StaticResource AppComboBoxStyle}"
+                                                      MinWidth="160"
+                                                      HorizontalAlignment="Left"
+                                                      ItemsSource="{Binding Field.Choices}"
+                                                      SelectedItem="{Binding Choice}"
+                                                      Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" />
+                                            <TextBlock Style="{StaticResource FieldHintStyle}" Text="{Binding Field.Hint}" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -232,7 +286,7 @@
                             <StackPanel Visibility="{Binding Kind.IsCustom, Converter={StaticResource Visible}}">
                                 <TextBlock Style="{StaticResource LabelStyle}" Text="Settings" />
                                 <TextBox Style="{StaticResource LinesStyle}" FontFamily="Consolas" Text="{Binding SettingsText}" />
-                                <TextBlock Style="{StaticResource HintStyle}" Text="One per line, as key = value. The script gets each one as EASYVPN_KEY." />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="One per line, as key = value. The script gets each one as EASYVPN_KEY." />
                             </StackPanel>
 
                             <StackPanel Visibility="{Binding Kind.UsesPassword, Converter={StaticResource Visible}}">
@@ -240,7 +294,10 @@
                                 <PasswordBox x:Name="PasswordBox" Style="{StaticResource AppPasswordBoxStyle}" PasswordChanged="OnPasswordChanged" />
                                 <DockPanel Margin="0,4,0,0">
                                     <Button DockPanel.Dock="Right"
+                                            Padding="6,1"
+                                            MinHeight="0"
                                             Style="{StaticResource SubtleButtonStyle}"
+                                            FontSize="{StaticResource FontSizeSmall}"
                                             Content="Remove it"
                                             Click="OnRemovePasswordClick"
                                             Visibility="{Binding CanRemovePassword, Converter={StaticResource Visible}}" />
@@ -252,26 +309,36 @@
 
                     <!-- ======================================== what it reaches -->
                     <TextBlock Style="{StaticResource SectionStyle}" Text="NETWORK" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,14">
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,14,16,16">
                         <StackPanel>
                             <CheckBox Style="{StaticResource AppCheckBoxStyle}"
-                                      Content="Layer 2: the VPN gives this gateway the facility's Ethernet, as TOSIBOX Key in Layer 2 mode does"
+                                      Content="Layer 2: the VPN gives this gateway the facility's Ethernet, as a Tosibox Lock in Layer 2 mode does"
                                       IsChecked="{Binding Layer2}" />
                             <TextBlock Style="{StaticResource HintStyle}" Margin="24,2,0,0" Text="Workstations then get the facility's LAN on their EasyVPN L2 adapter, so routes and DNS are not used." Visibility="{Binding Layer2, Converter={StaticResource Visible}}" />
 
                             <StackPanel Visibility="{Binding Layer2, Converter={StaticResource Visible}, ConverterParameter=invert}">
                                 <TextBlock Style="{StaticResource LabelStyle}" Text="Routes" />
                                 <TextBox Style="{StaticResource LinesStyle}" FontFamily="Consolas" Text="{Binding Routes, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock Style="{StaticResource HintStyle}" Text="The facility's networks, one per line, such as 10.60.0.0/24: workstations send these, and only these, to the gateway. Leave it empty to use the networks its VPN sets up when it connects; most VPN servers send them then, rather than putting them in the profile." />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="The facility's networks, one per line, such as 10.60.0.0/24: workstations send these, and only these, to the gateway. Empty: the networks its VPN sets up when it connects - most VPN servers send them then." />
                             </StackPanel>
 
-                            <TextBlock Style="{StaticResource LabelStyle}" Text="Check" />
-                            <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding Check, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="Optional. host:port inside the facility that answers once it is connected, such as a PLC's 102 or an HMI's 443: connected then means the plant answers too, and a dropped plant is noticed. Without one, connected is when the VPN client says so." />
-
-                            <TextBlock Style="{StaticResource LabelStyle}" Text="Timeout, in seconds" />
-                            <TextBox Width="120" HorizontalAlignment="Left" Style="{StaticResource FieldStyle}" Text="{Binding Timeout, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="How long to wait for the check once the VPN client has run: give one connected by hand time to sign in, such as 300." />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource LabelStyle}" Text="Check (optional)" />
+                                    <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding Check, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource FieldHintStyle}" Text="host:port inside the facility that answers once it is connected, such as a PLC's 102 or an HMI's 443: connected then means the plant answers too. Without one, connected is when the VPN client says so." />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource LabelStyle}" Text="Timeout (s)" />
+                                    <TextBox Style="{StaticResource FieldStyle}" Text="{Binding Timeout, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource FieldHintStyle}" Text="How long to wait for the check, or the VPN's networks, once the VPN client has run. Give one connected by hand time to sign in, such as 300." />
+                                </StackPanel>
+                            </Grid>
 
                             <Grid Visibility="{Binding Layer2, Converter={StaticResource Visible}, ConverterParameter=invert}">
                                 <Grid.ColumnDefinitions>
@@ -280,30 +347,33 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource LabelStyle}" Text="DNS names" />
+                                    <TextBlock Style="{StaticResource LabelStyle}" Text="DNS names (optional)" />
                                     <TextBox Style="{StaticResource FieldStyle}" Text="{Binding DnsDomains, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource HintStyle}" Text="Such as plant.acme.local. Optional." />
+                                    <TextBlock Style="{StaticResource FieldHintStyle}" Text="Such as plant.acme.local: names under these resolve through the facility's DNS servers while it is connected." />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Style="{StaticResource LabelStyle}" Text="DNS servers" />
                                     <TextBox Style="{StaticResource FieldStyle}" FontFamily="Consolas" Text="{Binding DnsServers, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource HintStyle}" Text="Inside the facility; they answer for those names while it is connected." />
+                                    <TextBlock Style="{StaticResource FieldHintStyle}" Text="Inside the facility, comma separated." />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
                     </Border>
 
                     <!-- ======================================== for the engineers -->
-                    <TextBlock Style="{StaticResource SectionStyle}" Text="FOR WHOEVER CONNECTS" />
-                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,0,16,14">
+                    <TextBlock Style="{StaticResource SectionStyle}" Text="NOTES AND LINKS" />
+                    <Border Style="{StaticResource CardBorderStyle}" Padding="16,0,16,16">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource LabelStyle}" Text="Notes" />
-                            <TextBox Style="{StaticResource LinesStyle}" Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="Shown in EasyVPN on the workstations: what is where, who to call." />
-
-                            <TextBlock Style="{StaticResource LabelStyle}" Text="Links" />
-                            <TextBox Style="{StaticResource LinesStyle}" Text="{Binding Links, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource HintStyle}" Text="One per line, as Name = address: https://… opens the browser, rdp://host Remote Desktop." />
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Notes" />
+                                <TextBox Style="{StaticResource LinesStyle}" Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="Shown in EasyVPN on the workstations: what is where, who to call." />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource LabelStyle}" Text="Links" />
+                                <TextBox Style="{StaticResource LinesStyle}" Text="{Binding Links, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHintStyle}" Text="One per line, as Name = address: https://… opens the browser, rdp://host Remote Desktop." />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>

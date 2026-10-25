@@ -18,7 +18,8 @@ public enum ConnectionState
 /// <summary>
 /// A facility as clients see it: everything except how the gateway connects to it. A routed
 /// facility's <see cref="Routes"/> go through the tunnel; a <see cref="Layer2"/> facility's
-/// Ethernet reaches the workstation's "EasyVPN L2" adapter instead.
+/// Ethernet reaches the workstation's "EasyVPN L2" adapter instead. <see cref="Group"/> is the
+/// folder the lists show it in, nested with '/' (Tosibox/Nord); without one, its customer's.
 /// </summary>
 public sealed record FacilityInfo(
     string Id,
@@ -30,7 +31,8 @@ public sealed record FacilityInfo(
     string? Check,
     string? Notes,
     IReadOnlyList<FacilityLink> Links,
-    bool Layer2 = false);
+    bool Layer2 = false,
+    string? Group = null);
 
 /// <summary>Names under <see cref="Domains"/> resolve through <see cref="Servers"/> while the facility is connected.</summary>
 public sealed record DnsRule(IReadOnlyList<string> Domains, IReadOnlyList<string> Servers);

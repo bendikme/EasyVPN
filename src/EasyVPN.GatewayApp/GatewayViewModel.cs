@@ -111,7 +111,22 @@ public sealed class GatewayViewModel : ObservableObject
 
     public string? AskedBy => _serviceOnline && State != ConnectionState.Disconnected && _overview?.Status.Client is { } client ? $"Asked by {client}" : null;
 
-    /// <summary>What the gateway did lately, newest first.</summary>
+    /// <summary>The connection, in a few words, for the status strip.</summary>
+    public string ConnectionText => !_serviceOnline ? "Not connected" : State switch
+    {
+        ConnectionState.Connecting => $"Connecting to {ActiveName}",
+        ConnectionState.Connected => $"Connected to {ActiveName}",
+        ConnectionState.Interrupted => $"{ActiveName} interrupted",
+        ConnectionState.Disconnecting => "Disconnecting",
+        ConnectionState.Failed => $"{ActiveName} failed",
+        _ => "No facility connected",
+    };
+
+    private string ActiveName => Active?.Name ?? _overview?.Status.FacilityId ?? "the facility";
+
+    /// <summary>The ports workstations reach the gateway on.</summary>
+    public string PortsText => $"API {ApiPort} · relay {_overview?.Status.RelayPort ?? Defaults.GatewayRelayPort}";
+
     // ---------------------------------------------------------------- activity
 
     /// <summary>
@@ -277,7 +292,12 @@ public sealed class GatewayViewModel : ObservableObject
         }
         var active = Active;
         foreach (var facility in Facilities)
-            facility.State = facility == active && State != ConnectionState.Disconnected ? State : null;
+        {
+            var carried = facility == active && State != ConnectionState.Disconnected;
+            facility.State = carried ? State : null;
+            facility.Message = carried ? Message : null;
+            facility.AskedBy = carried ? AskedBy : null;
+        }
         return changed;
     }
 
@@ -357,6 +377,8 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
 {
     private ConnectionState? _state;
     private CheckResult? _readiness;
+    private string? _message;
+    private string? _askedBy;
 
     public FacilityInfo Info { get; } = info;
     public string Id => Info.Id;
@@ -374,7 +396,26 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
     public ConnectionState? State
     {
         get => _state;
-        set => SetProperty(ref _state, value);
+        set
+        {
+            if (SetProperty(ref _state, value)) Raise(nameof(IsCarried));
+        }
+    }
+
+    /// <summary>The gateway carries it, or is getting to: Disconnect, rather than Connect.</summary>
+    public bool IsCarried => _state is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted;
+
+    /// <summary>What the gateway says of it while it carries it: the latest step, or how it ended.</summary>
+    public string? Message
+    {
+        get => _message;
+        set => SetProperty(ref _message, value);
+    }
+
+    public string? AskedBy
+    {
+        get => _askedBy;
+        set => SetProperty(ref _askedBy, value);
     }
 
     public CheckResult? Readiness
@@ -382,13 +423,16 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
         get => _readiness;
         set
         {
-            if (SetProperty(ref _readiness, value)) Raise(nameof(Level), nameof(ReadinessText));
+            if (SetProperty(ref _readiness, value)) Raise(nameof(Level), nameof(ReadinessText), nameof(Attention));
         }
     }
 
     public CheckLevel? Level => _readiness?.Level;
 
     public string ReadinessText => _readiness?.Text ?? "Not checked yet";
+
+    /// <summary>What its check found, shown only when it is not ready: a ready one says so in its dot's tooltip.</summary>
+    public string? Attention => _readiness is { Level: not CheckLevel.Ok } ? _readiness.Text : null;
 }
 
 /// <summary>One of the gateway's own checks, and what the app can do about it.</summary>

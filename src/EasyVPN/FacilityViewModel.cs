@@ -10,6 +10,14 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
     public string Id => Info.Id;
     public string Name => Info.Name;
     public string Customer => string.IsNullOrWhiteSpace(Info.Customer) ? "Other" : Info.Customer;
+
+    /// <summary>The groups it is in, outermost first: its own group's, nested with '/', or else its customer.</summary>
+    public IReadOnlyList<string> GroupNames { get; } =
+        (info.Group ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is { Length: > 0 } names
+            ? names
+            : [string.IsNullOrWhiteSpace(info.Customer) ? "Other" : info.Customer.Trim()];
+
+    public string GroupPath => string.Join(" / ", GroupNames);
     public string Routes => Info.Routes.Count == 0 && !Info.Layer2 ? "those its VPN sets up when it connects" : string.Join(", ", Info.Routes);
     public string Summary => $"{Info.Connector} · {(Info.Layer2 ? "Layer 2" : Info.Routes.Count == 0 ? "networks from its VPN" : Routes)}";
 
@@ -43,6 +51,8 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
         search.Length == 0
         || Name.Contains(search, StringComparison.CurrentCultureIgnoreCase)
         || Customer.Contains(search, StringComparison.CurrentCultureIgnoreCase)
+        || GroupPath.Contains(search, StringComparison.CurrentCultureIgnoreCase)
+        || Info.Connector.Contains(search, StringComparison.OrdinalIgnoreCase)
         || Routes.Contains(search, StringComparison.OrdinalIgnoreCase)
         || (Notes?.Contains(search, StringComparison.CurrentCultureIgnoreCase) ?? false);
 }

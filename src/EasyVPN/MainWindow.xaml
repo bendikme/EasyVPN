@@ -22,6 +22,10 @@
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Rows.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
         <local:VisibilityConverter x:Key="Visible" />
 
@@ -78,6 +82,7 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid x:Name="Root">
@@ -226,45 +231,35 @@
                     <RadioButton Style="{StaticResource FilterChipStyle}" GroupName="Filter" Content="Favourites" IsChecked="{Binding FavouritesOnly}" />
                 </StackPanel>
 
+                <!-- Groups, which open and close, and the facilities in those open. -->
                 <ListBox Grid.Row="1"
                          Margin="6,0,4,6"
                          Style="{StaticResource AppListBoxStyle}"
-                         ItemsSource="{Binding View}"
-                         SelectedItem="{Binding Selected}">
+                         ItemContainerStyle="{StaticResource RowContainerStyle}"
+                         ItemsSource="{Binding Rows}"
+                         SelectedItem="{Binding SelectedRow}"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling">
                     <ListBox.InputBindings>
                         <KeyBinding Key="Enter" Command="{Binding ConnectCommand}" />
                     </ListBox.InputBindings>
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource AppListBoxItemStyle}">
-                            <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.GroupStyle>
-                        <GroupStyle>
-                            <GroupStyle.HeaderTemplate>
-                                <DataTemplate>
-                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="10,12,0,4" Text="{Binding Name}" />
-                                </DataTemplate>
-                            </GroupStyle.HeaderTemplate>
-                        </GroupStyle>
-                    </ListBox.GroupStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate DataType="{x:Type local:FacilityViewModel}">
+                    <ListBox.Resources>
+                        <DataTemplate DataType="{x:Type local:FacilityRow}">
                             <!-- Double-click connects, as it launches a session in DynatecRDM. -->
-                            <Grid Background="Transparent">
+                            <Grid Margin="{Binding Indent}" Background="Transparent" AutomationProperties.Name="{Binding Facility.Name}">
                                 <Grid.InputBindings>
                                     <MouseBinding MouseAction="LeftDoubleClick"
                                                   Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                                  CommandParameter="{Binding}" />
+                                                  CommandParameter="{Binding Facility}" />
                                 </Grid.InputBindings>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Summary}"
+                                <StackPanel Grid.Column="0" Margin="17,0,0,0">
+                                    <TextBlock Text="{Binding Facility.Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Facility.Summary}"
                                                Margin="0,1,0,0"
                                                FontSize="{StaticResource FontSizeSmall}"
                                                Foreground="{DynamicResource TextMutedBrush}"
@@ -274,7 +269,7 @@
                                          Width="11"
                                          Height="11"
                                          Margin="8,0,0,0"
-                                         Visibility="{Binding IsFavourite, Converter={StaticResource Visible}}">
+                                         Visibility="{Binding Facility.IsFavourite, Converter={StaticResource Visible}}">
                                     <Path Style="{StaticResource IconFrameStyle}" Data="{StaticResource GeoStar}" Fill="{DynamicResource WarningBrush}" />
                                 </Viewbox>
                                 <Ellipse Grid.Column="2"
@@ -282,12 +277,21 @@
                                          Height="8"
                                          Margin="8,0,2,0"
                                          Style="{StaticResource StateDotStyle}"
-                                         Tag="{Binding State}"
-                                         Visibility="{Binding IsActive, Converter={StaticResource Visible}}" />
+                                         Tag="{Binding Facility.State}"
+                                         Visibility="{Binding Facility.IsActive, Converter={StaticResource Visible}}" />
                             </Grid>
                         </DataTemplate>
-                    </ListBox.ItemTemplate>
+                    </ListBox.Resources>
                 </ListBox>
+
+                <TextBlock Grid.Row="1"
+                           Margin="20"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           Text="Nothing matches the search."
+                           Visibility="{Binding NoMatches, Converter={StaticResource Visible}}" />
 
                 <TextBlock Grid.Row="1"
                            Margin="20"
@@ -460,32 +464,37 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- What this PC and the gateway did lately: the place to look when a connection fails. -->
-                    <StackPanel Margin="0,20,0,0" Visibility="{Binding Log, Converter={StaticResource Visible}}">
-                        <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="ACTIVITY" />
-                        <Border Style="{StaticResource CardBorderStyle}" Padding="14,10">
-                            <ItemsControl ItemsSource="{Binding Log}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="0,2">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}"
-                                                       Margin="0,0,14,0"
-                                                       FontSize="{StaticResource FontSizeSmall}"
-                                                       Foreground="{DynamicResource TextMutedBrush}" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding Text}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="{StaticResource FontSizeSmall}"
-                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </Border>
+                    <!-- What this PC and the gateway did lately: the place to look when a connection fails,
+                         kept low - its last few lines, more when asked for. -->
+                    <StackPanel Margin="0,28,0,0" Visibility="{Binding HasActivity, Converter={StaticResource Visible}}">
+                        <DockPanel Margin="0,0,0,4">
+                            <Button DockPanel.Dock="Right"
+                                    Padding="6,1"
+                                    MinHeight="0"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    FontSize="{StaticResource FontSizeSmall}"
+                                    Content="{Binding MoreActivityText}"
+                                    Command="{Binding MoreActivityCommand}" />
+                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="RECENT ACTIVITY" />
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Log}"
+                                      TextElement.FontSize="{StaticResource FontSizeSmall}"
+                                      TextElement.Foreground="{DynamicResource TextMutedBrush}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="56" />
+                                            <ColumnDefinition Width="56" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}" />
+                                        <TextBlock Grid.Column="1" Opacity="0.7" Text="{Binding Source}" />
+                                        <TextBlock Grid.Column="2" TextWrapping="Wrap" Text="{Binding Text}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

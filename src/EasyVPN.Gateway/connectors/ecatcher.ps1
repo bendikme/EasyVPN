@@ -48,10 +48,15 @@ if ($Action -eq 'Check') {
 
 $run = @('--program', $powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ui)
 
+# eCatcher on any desktop: its launcher, or the Java it runs in, from its own folder.
+$running = Get-Process eCatcher, javaw, java -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -ne 0 -and "$($_.Path)" -like '*eCatcher*' }
+
 # The gateway runs it in each signed-in desktop session in turn, and passes on what it prints and
 # its exit code: 3 when eCatcher was in none of them.
 if ($Action -eq 'Disconnect') {
-    & $gateway desktop @run Disconnect
+    $LASTEXITCODE = $notHere
+    if ($running) { & $gateway desktop @run Disconnect }
     if ($LASTEXITCODE -eq $notHere) {
         Write-Output 'eCatcher is not running, so nothing is connected.'
         exit 0
@@ -59,8 +64,10 @@ if ($Action -eq 'Disconnect') {
     exit $LASTEXITCODE
 }
 
-# Only where someone is at the desktop, unlocked first; started there when it runs nowhere.
-& $gateway desktop --usable-only @run Connect
+# Only where someone is at the desktop, unlocked first; started there straight away when it runs
+# nowhere, rather than looked for there first.
+$LASTEXITCODE = $notHere
+if ($running) { & $gateway desktop --usable-only @run Connect }
 if ($LASTEXITCODE -eq $notHere) {
     & $gateway desktop --usable-only @run Connect -Start
 }

@@ -6,7 +6,7 @@ using System.Windows.Threading;
 namespace EasyVPN;
 
 /// <summary>
-/// The window and the tray menu: the gateway's facilities, grouped by customer, and the one
+/// The window and the tray menu: the gateway's facilities, in their groups, and the one
 /// connection there is. All of it comes from the agent, asked every second.
 /// </summary>
 public sealed class MainViewModel : ObservableObject
@@ -26,17 +26,18 @@ public sealed class MainViewModel : ObservableObject
     private DateTime _loaded = DateTime.MinValue;
     private bool _polling;
     private bool _updating;
+    private bool _moreActivity;
+    private ListRow? _selectedRow;
+    private string? _activeId;
+
+    // Rows are kept from one build of the list to the next, so the list keeps its place.
+    private readonly Dictionary<string, GroupRow> _groupRows = new(StringComparer.CurrentCultureIgnoreCase);
+    private readonly Dictionary<string, FacilityRow> _facilityRows = new(StringComparer.OrdinalIgnoreCase);
 
     public MainViewModel(AgentClient agent, UserSettings user)
     {
         _agent = agent;
         _user = user;
-
-        View = CollectionViewSource.GetDefaultView(Facilities);
-        View.GroupDescriptions.Add(new PropertyGroupDescription(nameof(FacilityViewModel.Customer)));
-        View.SortDescriptions.Add(new SortDescription(nameof(FacilityViewModel.Customer), ListSortDirection.Ascending));
-        View.SortDescriptions.Add(new SortDescription(nameof(FacilityViewModel.Name), ListSortDirection.Ascending));
-        View.Filter = item => item is FacilityViewModel f && (!_favouritesOnly || f.IsFavourite) && f.Matches(_search.Trim());
 
         ConnectCommand = new AsyncRelayCommand(p => ConnectAsync(p as FacilityViewModel ?? Selected));
         DisconnectCommand = new AsyncRelayCommand(DisconnectAsync);
@@ -45,6 +46,17 @@ public sealed class MainViewModel : ObservableObject
         OpenLinkCommand = new RelayCommand(p => Try(() => Launcher.Open(((FacilityLink)p!).Url)));
         OpenGatewayDesktopCommand = new RelayCommand(() => Try(() => Launcher.RemoteDesktop(GatewayHost)));
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
+        ToggleGroupCommand = new RelayCommand(p =>
+        {
+            if (p is not GroupRow group) return;
+            _user.SetOpen(group.Path, !group.IsOpen);
+            Rebuild();
+        });
+        MoreActivityCommand = new RelayCommand(() =>
+        {
+            _moreActivity = !_moreActivity;
+            Raise(nameof(Log), nameof(MoreActivityText));
+        });
         UpdateCommand = new AsyncRelayCommand(UpdateAsync);
 
         _timer.Tick += async (_, _) => await PollAsync();
@@ -52,8 +64,14 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<FacilityViewModel> Facilities { get; } = [];
 
-    /// <summary>The facilities as the list shows them: grouped, sorted and filtered.</summary>
-    public ICollectionView View { get; }
+    /// <summary>
+    /// The list as shown: the groups, and the facilities in those open - or, while searching (or
+    /// showing favourites), every group with one to show in it, open.
+    /// </summary>
+    public ObservableCollection<ListRow> Rows { get; } = [];
+
+    /// <summary>This user's favourites, recent facilities and open groups, which the tray menu shows too.</summary>
+    public UserSettings User => _user;
 
     public AsyncRelayCommand ConnectCommand { get; }
     public AsyncRelayCommand DisconnectCommand { get; }
@@ -62,6 +80,12 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand OpenLinkCommand { get; }
     public RelayCommand OpenGatewayDesktopCommand { get; }
     public RelayCommand ClearSearchCommand { get; }
+
+    /// <summary>Opens or closes a group.</summary>
+    public RelayCommand ToggleGroupCommand { get; }
+
+    /// <summary>The activity's last few lines, or more of them.</summary>
+    public RelayCommand MoreActivityCommand { get; }
 
     /// <summary>Installs the newer version found, or else looks for one.</summary>
     public AsyncRelayCommand UpdateCommand { get; }
@@ -74,7 +98,7 @@ public sealed class MainViewModel : ObservableObject
         get => _search;
         set
         {
-            if (SetProperty(ref _search, value)) View.Refresh();
+            if (SetProperty(ref _search, value)) Rebuild();
         }
     }
 
@@ -85,7 +109,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _favouritesOnly, value)) return;
             OnPropertyChanged(nameof(ShowAll));
-            View.Refresh();
+            Rebuild();
         }
     }
 
@@ -101,13 +125,76 @@ public sealed class MainViewModel : ObservableObject
 
     public bool HasNoFacilities => Configured && Facilities.Count == 0;
 
+    public bool NoMatches => Facilities.Count > 0 && Rows.Count == 0;
+
     public FacilityViewModel? Selected
     {
         get => _selected;
         set
         {
-            if (SetProperty(ref _selected, value)) OnPropertyChanged(string.Empty);
+            if (!SetProperty(ref _selected, value)) return;
+            _selectedRow = value is null ? null : _facilityRows.GetValueOrDefault(value.Id) is { } row && Rows.Contains(row) ? row : null;
+            OnPropertyChanged(string.Empty);
         }
+    }
+
+    /// <summary>The list's selection. Only a facility is selected: a group opens or closes instead.</summary>
+    public ListRow? SelectedRow
+    {
+        get => _selectedRow;
+        set
+        {
+            if (value is FacilityRow row) Selected = row.Facility;
+            else OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Shows a facility in the list, its groups opened, and selects it.</summary>
+    public void Show(FacilityViewModel facility)
+    {
+        var path = "";
+        foreach (var name in facility.GroupNames)
+        {
+            path = path.Length == 0 ? name : $"{path}/{name}";
+            if (!_user.IsOpen(path, OpenByDefault)) _user.SetOpen(path, true);
+        }
+        if (_favouritesOnly && !facility.IsFavourite) FavouritesOnly = false;
+        Rebuild();
+        Selected = facility;
+    }
+
+    private bool OpenByDefault => Facilities.Count <= FacilityTree.OpenUpTo;
+
+    /// <summary>The list again, after something outside it - the tray menu - opened or closed a group.</summary>
+    public void RebuildList() => Rebuild();
+
+    /// <summary>The rows again, changed in place: rows kept from the last build keep their place in the list.</summary>
+    private void Rebuild()
+    {
+        var query = _search.Trim();
+        var rows = new List<ListRow>();
+        FacilityTree.Append(
+            rows,
+            Facilities.Where(f => (!_favouritesOnly || f.IsFavourite) && f.Matches(query)),
+            searching: query.Length > 0 || _favouritesOnly,
+            path => _user.IsOpen(path, OpenByDefault),
+            path => _groupRows.TryGetValue(path, out var row) ? row : _groupRows[path] = new GroupRow(path),
+            facility => _facilityRows.TryGetValue(facility.Id, out var row) && row.Facility == facility ? row : _facilityRows[facility.Id] = new FacilityRow(facility),
+            int.MaxValue,
+            out _);
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (i < Rows.Count)
+            {
+                if (!ReferenceEquals(Rows[i], rows[i])) Rows[i] = rows[i];
+            }
+            else Rows.Add(rows[i]);
+        }
+        while (Rows.Count > rows.Count) Rows.RemoveAt(Rows.Count - 1);
+
+        _selectedRow = _selected is not null && _facilityRows.GetValueOrDefault(_selected.Id) is { } selected && Rows.Contains(selected) ? selected : null;
+        OnPropertyChanged(nameof(SelectedRow));
     }
 
     // ---------------------------------------------------------------- the connection
@@ -121,6 +208,9 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>There is a connection to end.</summary>
     public bool IsBusy => State is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted;
 
+    /// <summary>What the connection is doing, as this PC's agent says: the gateway's latest step, or how it ended.</summary>
+    public string? StatusMessage => _status?.Message;
+
     /// <summary>The last thing that went wrong in the app itself (the agent's own troubles are in its message).</summary>
     public string? Error
     {
@@ -128,8 +218,12 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _error, value);
     }
 
-    /// <summary>What this PC and the gateway did lately, newest first.</summary>
-    public IReadOnlyList<LogLine> Log => [.. (_status?.Log ?? []).Reverse().Take(30)];
+    /// <summary>What this PC and the gateway did lately, newest first: the last few lines, or with <see cref="MoreActivityCommand"/> more.</summary>
+    public IReadOnlyList<ActivityLine> Log => [.. (_status?.Log ?? []).Reverse().Take(_moreActivity ? 30 : 3).Select(ActivityLine.Of)];
+
+    public bool HasActivity => _status?.Log is { Count: > 0 };
+
+    public string MoreActivityText => _moreActivity ? "Show less" : "Show more";
 
     // ---------------------------------------------------------------- the selected facility
 
@@ -246,8 +340,7 @@ public sealed class MainViewModel : ObservableObject
             var due = DateTime.UtcNow - _loaded > (Facilities.Count == 0 ? TimeSpan.FromSeconds(10) : FacilityRefresh);
             if (Configured && due) await LoadAsync();
 
-            foreach (var facility in Facilities)
-                facility.State = facility == Active && State != ConnectionState.Disconnected ? State : null;
+            UpdateStates();
             OnPropertyChanged(string.Empty);
         }
         finally
@@ -266,7 +359,9 @@ public sealed class MainViewModel : ObservableObject
             var selected = _selected?.Id;
             Facilities.Clear();
             foreach (var info in facilities) Facilities.Add(new FacilityViewModel(info, _user.IsFavourite(info.Id)));
-            Selected = Find(selected) ?? Active ?? View.Cast<FacilityViewModel>().FirstOrDefault();
+            UpdateStates();
+            Rebuild();
+            Selected = Find(selected) ?? Active ?? Rows.OfType<FacilityRow>().FirstOrDefault()?.Facility ?? Facilities.FirstOrDefault();
             Error = null;
         }
         catch (AgentException ex)
@@ -280,6 +375,7 @@ public sealed class MainViewModel : ObservableObject
         if (facility is null) return;
         Selected = facility;
         await Try(() => _agent.ConnectAsync(facility.Id));
+        if (Error is null) _user.Used(facility.Id);
         await PollAsync();
     }
 
@@ -301,8 +397,19 @@ public sealed class MainViewModel : ObservableObject
         if (facility is null) return;
         facility.IsFavourite = !facility.IsFavourite;
         _user.SetFavourite(facility.Id, facility.IsFavourite);
-        if (_favouritesOnly) View.Refresh();
+        if (_favouritesOnly) Rebuild();
         OnPropertyChanged(string.Empty);
+    }
+
+    /// <summary>Marks the facility connected; the groups say which one holds it, so the list is built again when it changes.</summary>
+    private void UpdateStates()
+    {
+        foreach (var facility in Facilities)
+            facility.State = facility == Active && State != ConnectionState.Disconnected ? State : null;
+        var active = Facilities.FirstOrDefault(f => f.IsActive)?.Id;
+        if (active == _activeId) return;
+        _activeId = active;
+        Rebuild();
     }
 
     private FacilityViewModel? Find(string? id) =>
@@ -333,4 +440,15 @@ public sealed class MainViewModel : ObservableObject
             Error = ex.Message;
         }
     }
+}
+
+/// <summary>One line of the activity: when, where - the gateway, or this PC - and what.</summary>
+public sealed record ActivityLine(DateTimeOffset Time, string Source, string Text)
+{
+    // The agent marks the gateway's lines so.
+    private const string FromGateway = "Gateway: ";
+
+    public static ActivityLine Of(LogLine line) => line.Text.StartsWith(FromGateway, StringComparison.Ordinal)
+        ? new(line.Time, "Gateway", line.Text[FromGateway.Length..])
+        : new(line.Time, "This PC", line.Text);
 }

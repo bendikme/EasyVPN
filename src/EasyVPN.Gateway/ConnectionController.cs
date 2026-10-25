@@ -30,7 +30,7 @@ public sealed class ConnectionController(
 {
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CleanupWait = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan RoutesPoll = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RoutesPoll = TimeSpan.FromSeconds(1);
     private const int MissesBeforeInterrupted = 2;
 
     private readonly SemaphoreSlim _busy = new(1, 1);
@@ -44,6 +44,9 @@ public sealed class ConnectionController(
     // The hub's launch its adapter was last shared at, or null when it is not, or -1 when sharing
     // failed: a later launch made the adapter again, shared with nothing. Only touched while _busy is held.
     private int? _sharedAt;
+
+    // The adapter shared then, by its id. Only touched while _busy is held.
+    private string? _sharedAdapter;
 
     // Why the hub would not start, said once. Only touched while _busy is held.
     private string? _hubProblem;
@@ -166,10 +169,27 @@ public sealed class ConnectionController(
         }
 
         var routes = facility.Routes;
+        // Shared as soon as it is plain which adapter the VPN's networks are on, while they are
+        // still waited on to hold still: sharing takes some seconds of its own.
+        Task? early = null;
         if (learn)
         {
             Set(request, ConnectionState.Connecting, "Waiting for the networks its VPN sets up. Sign in on the gateway if the VPN client asks.");
-            routes = await LearnRoutesAsync(before, deadline, ct);
+            try
+            {
+                routes = await LearnRoutesAsync(before, deadline, ct, found =>
+                {
+                    if (early is not null || Sharing.Carrying(found) is not { } adapter) return;
+                    Set(request, ConnectionState.Connecting, $"Sharing {facility.Name}'s VPN with the workstations");
+                    early = ShareAsync(adapter, ct);
+                });
+            }
+            finally
+            {
+                // Never left running under what comes next. Should it have failed, sharing is tried
+                // once more below, and says why.
+                if (early is not null) await Settled(early);
+            }
             if (routes.Count == 0)
             {
                 await FailAsync(request,
@@ -183,7 +203,7 @@ public sealed class ConnectionController(
         {
             if (request == _request) _routes = facility.Layer2 ? null : routes;
         }
-        if (!facility.Layer2) Set(request, ConnectionState.Connecting, $"Sharing {facility.Name}'s VPN with the workstations");
+        if (!facility.Layer2 && early is null) Set(request, ConnectionState.Connecting, $"Sharing {facility.Name}'s VPN with the workstations");
         try
         {
             await OpenWayInAsync(facility, ct);
@@ -200,12 +220,14 @@ public sealed class ConnectionController(
     /// The networks the VPN has added since <paramref name="before"/>, once they hold still: a VPN
     /// client adds its routes a few seconds after it connects, and not always all at once.
     /// </summary>
-    private static async Task<List<string>> LearnRoutesAsync(IReadOnlyList<VpnRoutes.Route> before, DateTime deadline, CancellationToken ct)
+    /// <param name="found">Told what there is so far, each time there is some.</param>
+    private static async Task<List<string>> LearnRoutesAsync(IReadOnlyList<VpnRoutes.Route> before, DateTime deadline, CancellationToken ct, Action<List<string>>? found = null)
     {
         List<string> last = [];
         while (true)
         {
             var now = VpnRoutes.Added(before, VpnRoutes.Snapshot());
+            if (now.Count > 0) found?.Invoke(now);
             if (now.Count > 0 && now.SequenceEqual(last)) return now;
             if (DateTime.UtcNow >= deadline) return now;
             last = now;
@@ -235,18 +257,39 @@ public sealed class ConnectionController(
         lock (_sync) routes = _routes ?? facility.Routes;
         var vpn = Sharing.Carrying(routes)
             ?? throw new InvalidOperationException($"This gateway has no route to {string.Join(", ", routes)} to share with the workstations.");
+        // Shared already, while its networks were coming in.
+        if (_sharedAt == hub.Launches && _sharedAdapter == vpn.Id) return;
+        await ShareAsync(vpn, ct);
+    }
+
+    /// <exception cref="InvalidOperationException">Windows would not share it.</exception>
+    private async Task ShareAsync(System.Net.NetworkInformation.NetworkInterface vpn, CancellationToken ct)
+    {
         var launch = hub.Launches;
         // Marked first, so a share that fails halfway is undone all the same, and tried again.
-        _sharedAt = -1;
+        (_sharedAt, _sharedAdapter) = (-1, null);
         await sharing.ShareAsync(vpn, ct);
-        _sharedAt = launch;
+        (_sharedAt, _sharedAdapter) = (launch, vpn.Id);
+    }
+
+    /// <summary>Waits for a task, whatever came of it.</summary>
+    private static async Task Settled(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception)
+        {
+            // What came of it is looked at again by whoever needs it.
+        }
     }
 
     private async Task CloseWayInAsync()
     {
         layer2.Close();
         if (_sharedAt is null) return;
-        _sharedAt = null;
+        (_sharedAt, _sharedAdapter) = (null, null);
         await sharing.UnshareAsync();
     }
 

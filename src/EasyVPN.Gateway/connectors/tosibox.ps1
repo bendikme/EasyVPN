@@ -34,10 +34,14 @@ if ($Action -eq 'Check') {
     return
 }
 
+# Tosi Client on any desktop (its window, or its agent in the notification area).
+$running = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 -and $_.ProcessName -like 'tosi*' }
+
 # The gateway starts the app in each signed-in desktop session in turn, and passes on what it
 # prints and its exit code: 3 when the client was in none of them.
 if ($Action -eq 'Disconnect') {
-    & $gateway desktop --tosibox disconnect $env:EASYVPN_LOCK
+    $LASTEXITCODE = $notHere
+    if ($running) { & $gateway desktop --tosibox disconnect $env:EASYVPN_LOCK }
     if ($LASTEXITCODE -eq $notHere) {
         Write-Output 'Tosi Client is not running, so nothing is connected.'
         exit 0
@@ -45,8 +49,10 @@ if ($Action -eq 'Disconnect') {
     exit $LASTEXITCODE
 }
 
-# Only where someone is at the desktop, unlocked first: the client is typed into.
-& $gateway desktop --usable-only --tosibox connect $env:EASYVPN_LOCK
+# Only where someone is at the desktop, unlocked first: the client is typed into. When it runs on
+# no desktop at all, it is started straight away, rather than looked for there first.
+$LASTEXITCODE = $notHere
+if ($running) { & $gateway desktop --usable-only --tosibox connect $env:EASYVPN_LOCK }
 if ($LASTEXITCODE -eq $notHere) {
     # Not running there, or hidden away: start it there - closing a copy left on a desktop nobody
     # is at, which would keep it from starting.

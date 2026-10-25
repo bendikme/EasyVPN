@@ -14,6 +14,17 @@ public sealed class UserSettings
 
     public List<string> Favourites { get; set; } = [];
 
+    /// <summary>The facilities this user connected lately, by id, the latest first.</summary>
+    public List<string> Recent { get; set; } = [];
+
+    /// <summary>Groups this user opened or closed, by path. One never touched follows <see cref="FacilityTree.OpenUpTo"/>.</summary>
+    public Dictionary<string, bool> Groups { get; set; } = [];
+
+    /// <summary>The shortcut that opens the tray menu from anywhere, as DynatecRDM's Ctrl+Alt+R does. Empty for none.</summary>
+    public string Hotkey { get; set; } = "Ctrl+Alt+F";
+
+    private const int RecentKept = 8;
+
     public static UserSettings Load()
     {
         try
@@ -38,6 +49,22 @@ public sealed class UserSettings
     {
         Favourites.RemoveAll(f => string.Equals(f, id, StringComparison.OrdinalIgnoreCase));
         if (favourite) Favourites.Add(id);
+        Save();
+    }
+
+    public void Used(string id)
+    {
+        Recent.RemoveAll(r => string.Equals(r, id, StringComparison.OrdinalIgnoreCase));
+        Recent.Insert(0, id);
+        if (Recent.Count > RecentKept) Recent.RemoveRange(RecentKept, Recent.Count - RecentKept);
+        Save();
+    }
+
+    public bool IsOpen(string group, bool otherwise) => Groups.TryGetValue(group, out var open) ? open : otherwise;
+
+    public void SetOpen(string group, bool open)
+    {
+        Groups[group] = open;
         Save();
     }
 

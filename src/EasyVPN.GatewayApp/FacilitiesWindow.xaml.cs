@@ -59,6 +59,30 @@ public partial class FacilitiesWindow : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
+    // ---------------------------------------------------------------- the window's own title strip
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => WindowFrame.ToggleMaximized(this);
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        WindowFrame.FitMaximized(this, Root);
+    }
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        WindowFrame.FitMaximized(this, Root);
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        WindowFrame.FitMaximized(this, Root);
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
         if (_model.IsDirty)

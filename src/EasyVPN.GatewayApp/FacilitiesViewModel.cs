@@ -230,7 +230,7 @@ public sealed class FacilitiesViewModel : ObservableObject
 
     private void Add()
     {
-        var draft = new FacilityDraft(new Facility { Customer = _selected?.Customer ?? "" }, KindOf("manual")) { AutoId = true };
+        var draft = new FacilityDraft(new Facility { Customer = _selected?.Customer ?? "", Group = _selected?.Group }, KindOf("manual")) { AutoId = true };
         Track(draft);
         Filter = "";
         Selected = draft;
@@ -402,6 +402,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
     private string _id;
     private string _name;
     private string _customer;
+    private string _group;
     private ConnectorKind _kind;
     private readonly Dictionary<string, string> _settings;
     private string? _password;
@@ -423,6 +424,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
         _id = facility.Id;
         _name = facility.Name;
         _customer = facility.Customer;
+        _group = facility.Group ?? "";
         _kind = kind;
         _settings = new Dictionary<string, string>(facility.Settings, StringComparer.OrdinalIgnoreCase);
         _password = facility.Password;
@@ -468,6 +470,13 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
         {
             if (SetProperty(ref _customer, value)) OnPropertyChanged(nameof(Subtitle));
         }
+    }
+
+    /// <summary>The folder EasyVPN's lists show it in, nested with '/'. Empty: its customer's.</summary>
+    public string Group
+    {
+        get => _group;
+        set => SetProperty(ref _group, value);
     }
 
     public string Title => _name.Trim().Length > 0 ? _name.Trim() : "New facility";
@@ -656,6 +665,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
             Id = _id.Trim(),
             Name = _name.Trim(),
             Customer = _customer.Trim(),
+            Group = string.Join('/', _group.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) is { Length: > 0 } group ? group : null,
             Connector = _kind.Name,
             Settings = _settings.Where(s => s.Value.Trim().Length > 0).ToDictionary(s => s.Key, s => s.Value.Trim()),
             Password = _newPassword.Length > 0 ? protect ? Secret.Protect(_newPassword) : "(new)"

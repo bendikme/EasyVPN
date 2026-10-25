@@ -174,6 +174,18 @@ The first time the agent reaches the gateway it pins the gateway's certificate; 
 fingerprint to compare with the gateway's. An update closes the app on every account signed in; run
 by double-clicking, it starts the new one again afterwards.
 
+**The app** lives in the notification area, like DynatecRDM. A click on its icon (or `Ctrl+Alt+F`
+anywhere) opens the tray menu: a search box, then the facility connected - with what it is doing,
+and *Disconnect* - your favourites, the facilities you used lately, and every facility by group.
+Closed groups say how many they hold, so a hundred Tosibox Locks take a line; with more than 15
+facilities they start closed, and the app remembers which you open. Typing shows every facility
+whose name, customer, group, VPN client, networks or notes match, wherever it is. The keys are
+those of DynatecRDM's quick launch: ↑ ↓ (Page Up, Page Down) to choose, → ← to open and close a
+group, Enter to connect, Delete to disconnect, Esc to close. Connecting another facility while the
+gateway carries one asks first, since it disconnects it for every workstation. The window (*Open
+EasyVPN*, or a right-click on the icon) has the same list, the facility's details and its activity.
+The shortcut is set in `%LOCALAPPDATA%\EasyVPN\app.json` (`"hotkey": "Ctrl+Alt+F"`, or `""` for none).
+
 **A development build.** `publish.ps1`'s folders carry install scripts instead. Copy
 `artifacts\Gateway` or `artifacts\Client` to the machine and, as administrator, run
 `.\install-gateway.ps1`, or `.\install-client.ps1 -Gateway gw01 -AccessKey <key>`; `-Uninstall`
@@ -233,7 +245,8 @@ has one of each kind.
 | Field | |
 | --- | --- |
 | `id` | Letters, digits, `.`, `-`, `_`. |
-| `customer` | Groups the list in the app. |
+| `customer` | Shown with the facility, and its group in the app when it has no `group`. |
+| `group` | Optional. The group the app lists it in, nested with `/`: `Tosibox/ACME`. |
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
 | `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
@@ -274,8 +287,9 @@ notification area, the app starts it there - with the program set in *Settings*
 (`TosiboxKey.exe`), or else one it finds where Windows keeps track of programs - after closing any
 copy of it left on another desktop, where nobody could use it and it would keep another from
 starting; then it types its password (from *Settings*, or the facility's own) and waits for the
-list to fill. It finds the Lock with the client's search, which filters the list to it and so
-keeps it in view whoever scrolls (or else scrolled to, or typed into the list), presses Connect or
+list to fill. It finds the Lock in view, or else with the client's search, which filters the list
+to it and so keeps it in view whoever scrolls (or else scrolled to, or typed into the list); the
+search is left showing it. It presses Connect or
 Disconnect (Cancel, for one still connecting), and waits until the client shows it. The gateway
 is the client's only user: before a Lock connects, any other the client has connected is
 disconnected, and after it disconnects, none is left connected. For that the app reads the whole
