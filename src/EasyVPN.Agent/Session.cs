@@ -21,6 +21,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
     private readonly SemaphoreSlim _wake = new(0);
     private AgentSettings _settings = AgentSettings.Load();
     private GatewayClient? _gateway;
+    private TunnelLease? _lease;
     private string? _wanted;
     private Outcome _outcome = Outcome.None;
     private AgentStatus _status = new(ConnectionState.Disconnected, null, null, false, false, false, []);
@@ -109,6 +110,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
             _settings = _settings.Apply(update);
             _gateway?.Dispose();
             _gateway = null;
+            _lease = null;
             _wanted = null;
             _outcome = Outcome.None;
         }
@@ -214,7 +216,13 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         }
 
         lock (_sync) _gatewayLog = gateway.Log;
-        tunnel.Start(settings, gateway.RelayPort);
+        if (await LeaseAsync(ct) is not { } lease)
+        {
+            await ReleaseAsync();
+            Publish(ConnectionState.Disconnected, wanted, "The gateway runs an older EasyVPN than this PC. It updates itself while nothing is connected.");
+            return;
+        }
+        tunnel.Start(settings, gateway.RelayPort, lease);
 
         if (wanted is null)
         {
@@ -258,6 +266,18 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
                 await EndAsync(ConnectionState.Disconnected, wanted, "Disconnected on the gateway");
                 break;
         }
+    }
+
+    /// <summary>This PC's address on the tunnel, asked of the gateway once.</summary>
+    private async Task<TunnelLease?> LeaseAsync(CancellationToken ct)
+    {
+        lock (_sync)
+        {
+            if (_lease is not null) return _lease;
+        }
+        var lease = await Gateway().TunnelAsync(ct);
+        lock (_sync) _lease ??= lease;
+        return lease;
     }
 
     private async Task CarryAsync(AgentSettings settings, string id, GatewayStatus gateway, CancellationToken ct)
@@ -339,7 +359,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         var relay = $"{settings.Host}:{relayPort}";
         if (!await Probe.TcpAsync(relay, ct))
             return $"The gateway's relay ({relay}) does not answer. Open TCP {relayPort} in the gateway's firewall, and check that its VPN client allows access to the local network.";
-        if (facility.Check is { } check && !await Probe.HeldOpenAsync(check, ct))
+        if (facility.Check is { } check && !await Probe.TcpAsync(check, ct, timeoutMs: 5000))
             return $"{check} answers the gateway but not this PC. The activity log shows what the tunnel reported.";
         return null;
     }

@@ -44,6 +44,15 @@ public sealed class GatewayClient : IDisposable
     public async Task<FacilityInfo[]> FacilitiesAsync(CancellationToken ct) =>
         await _http.GetFromJsonAsync<FacilityInfo[]>("facilities", Defaults.Json, ct) ?? [];
 
+    /// <summary>This PC's address on the tunnel. Null from a gateway too old to give one.</summary>
+    public async Task<TunnelLease?> TunnelAsync(CancellationToken ct)
+    {
+        using var response = await _http.PostAsync("tunnel", null, ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<TunnelLease>(Defaults.Json, ct);
+    }
+
     public async Task ConnectAsync(string id, CancellationToken ct)
     {
         using var response = await _http.PostAsync($"connect/{Uri.EscapeDataString(id)}", null, ct);

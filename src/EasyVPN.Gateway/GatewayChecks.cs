@@ -2,10 +2,11 @@ namespace EasyVPN.Gateway;
 
 /// <summary>
 /// What the gateway needs to do its job, checked when the EasyVPN Gateway app asks: the firewall
-/// letting workstations in, each facility's VPN client and settings (asked of its connector), and
-/// for Layer 2 facilities a bridged "EasyVPN L2" adapter. Nothing here connects anything.
+/// letting workstations in, Internet Connection Sharing to share a VPN with them, each facility's
+/// VPN client and settings (asked of its connector), and for Layer 2 facilities a bridged
+/// "EasyVPN L2" adapter. Nothing here connects anything.
 /// </summary>
-public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors, GatewaySettings settings)
+public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors, Sharing sharing, GatewaySettings settings)
 {
     /// <summary>The rule the installer makes.</summary>
     private const string FirewallRule = "EasyVPN Gateway";
@@ -20,6 +21,7 @@ public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors
         {
             var facilities = catalog.All();
             var results = new List<CheckResult> { Firewall() };
+            if (facilities.Any(f => !f.Layer2)) results.Add(await SharingAsync(ct));
             if (facilities.Any(f => f.Layer2)) results.Add(await Layer2Async(ct));
 
             using var few = new SemaphoreSlim(4);
@@ -72,6 +74,18 @@ public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors
         {
             return new(subject, CheckLevel.Warning, $"Could not read the firewall's rules: {ex.Message}");
         }
+    }
+
+    private async Task<CheckResult> SharingAsync(CancellationToken ct)
+    {
+        const string subject = "Sharing";
+        var (ok, shared) = await sharing.StatusAsync(ct);
+        if (!ok)
+            return new(subject, CheckLevel.Problem,
+                $"Workstations reach a facility through Windows' Internet Connection Sharing, which cannot be used here: {shared}");
+        return new(subject, CheckLevel.Ok, shared.Length == 0
+            ? "Internet Connection Sharing is ready to share a facility's VPN with the workstations."
+            : $"{shared} is shared with the workstations.");
     }
 
     private static async Task<CheckResult> Layer2Async(CancellationToken ct)

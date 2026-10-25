@@ -12,7 +12,7 @@
 
   <!-- The connectors stay loose files beside the exe, so an administrator can read and adapt them. -->
   <ItemGroup>
-    <None Update="connectors\*.ps1;facilities.sample.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Update="connectors\*.ps1;sharing.ps1;ecatcher-ui.ps1;facilities.sample.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />

@@ -5,17 +5,16 @@ using System.Net.Sockets;
 namespace EasyVPN.Agent;
 
 /// <summary>
-/// This workstation's end of the tunnel. gost, in tungo mode, keeps the "EasyVPN" adapter up and
-/// carries whatever is routed to it - TCP and UDP - over TLS to the gateway's relay. The adapter
-/// stays put whichever facility is connected; what changes is which networks network.ps1 routes
-/// to it, and which DNS names it sends to the facility.
+/// This workstation's end of the tunnel. gost keeps the "EasyVPN" adapter up and carries the
+/// packets routed to it - all of them, ping as well as TCP and UDP - over TLS to the gateway's
+/// relay, whose hub puts them out on the gateway and into the connected facility's VPN, which the
+/// gateway shares with the tunnel. So the adapter works as the VPN client's own would on this PC,
+/// whichever VPN client it is. The adapter stays put whichever facility is connected; what changes
+/// is which networks network.ps1 routes to it, and which DNS names it sends to the facility.
 /// </summary>
 public sealed class Tunnel(RecentLog log)
 {
-    public const string Adapter = "EasyVPN";
-
-    // A /30 from the benchmarking range, which no facility should be using.
-    private const string AdapterAddress = "198.18.255.1/30";
+    public const string Adapter = Defaults.TunnelAdapter;
 
     private static readonly string Script = Path.Combine(AppContext.BaseDirectory, "network.ps1");
 
@@ -28,7 +27,8 @@ public sealed class Tunnel(RecentLog log)
 
     public bool IsUp => Gost.IsRunning;
 
-    public void Start(AgentSettings settings, int relayPort) => Gost.Start(new
+    /// <param name="lease">This PC's address on the tunnel, which the gateway gave it.</param>
+    public void Start(AgentSettings settings, int relayPort, TunnelLease lease) => Gost.Start(new
     {
         Log = new { Level = "warn" },
         Services = new[]
@@ -37,8 +37,21 @@ public sealed class Tunnel(RecentLog log)
             {
                 Name = "tunnel",
                 Addr = ":0",
-                Handler = new { Type = "tungo", Chain = "gateway" },
-                Listener = new { Type = "tungo", Metadata = new { Name = Adapter, Net = AdapterAddress, Mtu = 1420 } },
+                // It tells the gateway it is there every 10 s, so the gateway knows where its answers go.
+                Handler = new { Type = "tun", Chain = "gateway", Metadata = new { Keepalive = true, Ttl = "10s" } },
+                Listener = new
+                {
+                    Type = "tun",
+                    Metadata = new
+                    {
+                        Name = Adapter,
+                        Net = $"{lease.Address}/{lease.PrefixLength}",
+                        Mtu = Defaults.TunnelMtu,
+                        Guid = Defaults.TunnelAdapterGuid,
+                    },
+                },
+                // The gateway's relay takes it to its hub whatever this says.
+                Forwarder = new { Nodes = new[] { new { Name = "hub", Addr = $"127.0.0.1:{Defaults.TunnelHubPort}" } } },
             },
         },
         Chains = new[]
@@ -96,12 +109,13 @@ public sealed class Tunnel(RecentLog log)
     /// <summary>
     /// NetBIOS off on the new adapter. Windows broadcasts NetBIOS on every adapter that has it, and
     /// on this one each broadcast would try to go through the tunnel - every second, for nothing.
+    /// And the networks Windows remembered for the adapters made before go, so this one is "EasyVPN".
     /// </summary>
     private async Task PrepareAsync()
     {
         var last = "";
         var code = await PowerShell.RunFileAsync(Script, ["Prepare"], new Dictionary<string, string>(), TimeSpan.FromMinutes(1), line => last = line, CancellationToken.None);
-        if (code != 0) _log.Add($"Could not turn NetBIOS off on the {Adapter} adapter: {last}");
+        if (code != 0) _log.Add($"Could not prepare the {Adapter} adapter: {last}");
     }
 
     /// <summary>Routes the facility's networks to the adapter and its DNS names to its servers.</summary>

@@ -4,9 +4,10 @@ Quick connections to remote facilities, whatever VPN client each customer requir
 
 One Windows **gateway** has every customer's VPN client installed and connects whichever facility is
 asked for. Each engineering **workstation** has one permanent network adapter, `EasyVPN`, and an app
-in the style of DynatecRDM: pick a facility, press Connect, and TIA Portal, a browser, Remote Desktop
-or anything else reaches the facility's machines through that adapter. The workstation never needs
-to know whether the facility uses FortiClient, Cisco, OpenVPN or anything else.
+in the style of DynatecRDM: pick a facility, press Connect, and the adapter works as the facility's
+VPN client's own adapter would if it ran on the workstation - ping, TIA Portal, a browser, Remote
+Desktop. The workstation never needs to know whether the facility uses Tosibox, Sophos, NetExtender,
+Pulse, GlobalProtect, OpenVPN or anything else.
 
 ```text
 WORKSTATION                                   GATEWAY (a VM or a small PC)
@@ -17,9 +18,11 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
  TIA Portal, browser, RDP …          │                                       │
         │ routes for the facility    │                                       │
         ▼                            ▼                                       ▼
- "EasyVPN" adapter ── gost (tungo) ═══ TLS :8421 ═══▶ gost relay ──▶ the active VPN ──▶ PLCs, HMIs
-   (Wintun)            TCP and UDP     pinned cert,     only to the facility's
-                                       access key       networks; closed otherwise
+ "EasyVPN" adapter ── gost (tun) ═══ TLS :8421 ═══▶ gost relay ─▶ hub ─▶ "EasyVPN-Gateway"
+   (Wintun)            IP packets      pinned cert,                           adapter (Wintun)
+                                       access key                                  │ Internet Connection
+                                                                                   ▼ Sharing
+                                                              the active VPN's adapter ──▶ PLCs, HMIs
 ```
 
 ## How it works
@@ -27,20 +30,27 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
 - **The gateway connects one facility at a time**, shared by every workstation. Connecting takes
   down whatever was up, runs the facility's *connector* (a small PowerShell script that drives one
   kind of VPN client) until the client says it is connected, and, for a facility with a *check*
-  address (a PLC's port 102, an HMI's 443), until that answers too. Only then does it open its
-  relay, and only to that facility's networks: its
-  `routes`, or for a facility without any, the networks its VPN set up on the gateway while
-  connecting (most VPN servers push them then, rather than writing them into the profile).
-- **The workstation's adapter stays put.** The agent keeps gost running in tungo mode: a Wintun
-  adapter whose TCP and UDP traffic goes over TLS to the gateway's relay, which makes the
-  connections itself, so through whichever VPN is up. Switching facilities changes only which
-  networks are routed to the adapter, and which DNS names go to the facility's DNS servers (via the
-  Name Resolution Policy Table, so the PC's own DNS is untouched).
+  address (a PLC's port 102, an HMI's 443), until that answers too. Only then does it open the way
+  in: it shares the adapter the facility's networks lead to - its VPN's - with the workstations,
+  through Windows' Internet Connection Sharing. The networks are the facility's `routes`, or for a
+  facility without any, those its VPN set up on the gateway while connecting (most VPN servers push
+  them then, rather than writing them into the profile).
+- **Packets, not connections.** The agent keeps gost running a Wintun adapter, `EasyVPN`, whose
+  packets - ping as well as TCP and UDP - go over TLS to the gateway's relay, and from there to the
+  gateway's hub, which puts them out on its own adapter, `EasyVPN-Gateway`, each workstation at an
+  address of its own (198.18.0.x, kept for it). Sharing takes them on into the VPN as if the
+  gateway had sent them, and brings the answers back. It is the same for every kind of VPN client,
+  since Windows shares an adapter whatever made it.
+- **The workstation's adapter stays put.** Switching facilities changes only which networks are
+  routed to it, and which DNS names go to the facility's DNS servers (via the Name Resolution
+  Policy Table, so the PC's own DNS is untouched). Both adapters are made with a fixed identity, so
+  Windows keeps seeing the same network on them, and the workstation's stays named `EasyVPN`
+  rather than `EasyVPN 2`, `EasyVPN 3` … after each update.
 - **Connected means verified.** The gateway calls a facility connected when its VPN client says so
-  and its check, if it has one, answers from the gateway; the agent when a connection from the
-  workstation reaches the gateway's relay, and the check through the tunnel.
-- **It fails closed.** If a facility with a check stops answering, the gateway closes the relay until it
-  answers again, so traffic stops rather than going some other way. The workstation keeps its
+  and its check, if it has one, answers from the gateway; the agent when the workstation reaches the
+  gateway's relay, and the check through the tunnel.
+- **It fails closed.** If a facility with a check stops answering, the gateway stops sharing its VPN
+  until it answers again, so traffic stops rather than going some other way. The workstation keeps its
   routes until you disconnect. Connecting another facility is refused while the previous one still
   answers, because two customers often use the same addresses (`192.168.0.10` at both) and a VPN
   left up underneath would quietly take the other one's traffic.
@@ -49,15 +59,15 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   [Layer 2 facilities](#layer-2-facilities).
 
 This is the design worked out in the "VPN client router" discussion: one shared Windows gateway VM,
-one permanent adapter, one active customer, and a controller. Its recommended building blocks are
-used: GOST v3 (TUNGO + relay, MIT) and Wintun. Neither Internet Connection Sharing nor a driver of
-our own is involved, and the vendor clients run untouched, as they were designed to.
+one permanent adapter, one active customer, and a controller. Its building blocks are GOST v3 (TUN
+and relay, MIT), Wintun and Windows' own Internet Connection Sharing; there is no driver of our own,
+and the vendor clients run untouched, as they were designed to.
 
 ## Projects
 
 | Folder | What it is |
 | --- | --- |
-| `src\EasyVPN.Gateway` | The gateway service: API, facility catalog, connectors, relay, connection controller |
+| `src\EasyVPN.Gateway` | The gateway service: API, facility catalog, connectors, relay and hub, sharing (`sharing.ps1`), connection controller |
 | `src\EasyVPN.Gateway\connectors` | One script per kind of VPN client |
 | `src\EasyVPN.Agent` | The workstation service: tunnel, routes and DNS (`network.ps1`), session |
 | `src\EasyVPN` | The app: WPF, using DynatecRDM's design system (`Themes\`), light and dark |
@@ -117,8 +127,10 @@ notification area of everyone who signs in to the gateway (and in the Start menu
 - every facility, and whether it is ready: its connector checks, without connecting anything, that
   its VPN client is installed and its settings are in place (the profile file is there, the
   Windows VPN connection exists, …);
-- what the gateway itself lacks: the firewall rule, and for Layer 2 OpenVPN, the *EasyVPN L2*
-  adapter and its bridge, each with a button that fixes it or shows where to;
+- what the gateway itself lacks: the firewall rule, Internet Connection Sharing (the *Internet
+  Connection Sharing (ICS)* service must not be disabled, nor sharing forbidden by group policy),
+  and for Layer 2 OpenVPN, the *EasyVPN L2* adapter and its bridge, each with a button that fixes
+  it or shows where to;
 - mistakes in `facilities.json`.
 
 *Edit facilities* (or *Edit* beside one) opens the **facility editor**, as administrator: add,
@@ -135,7 +147,7 @@ editor opens in Notepad; *Encrypt a password* in the app makes a `password` for 
 
 *Settings…*, at the top of the app, opens (as administrator) what the facilities of a kind share,
 set once rather than in each: for Tosibox, Tosi Client's program (`TosiboxKey.exe`) and its
-password. They are kept in `%ProgramData%\EasyVPN\Gateway\settings.json`, which the gateway reads
+password; for eCatcher, the Talk2M account, user and password. They are kept in `%ProgramData%\EasyVPN\Gateway\settings.json`, which the gateway reads
 again whenever it changes; a facility's own setting, or its own password, wins over them.
 
 For VPN clients that need someone to sign in (MFA, SAML), set the gateway to log on to a
@@ -223,7 +235,7 @@ has one of each kind.
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
 | `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
-| `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway; the relay reaches nothing else. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
+| `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway, which shares the adapter they lead to (its VPN's) with them. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
 | `check` | Optional. `host:port` inside the facility that answers when it is reachable. With one, connected also means the plant answers, a plant that stops answering is noticed (and its traffic blocked), and switching confirms the previous facility is really down. Without one, connected is when the connector says its VPN client is connected. |
@@ -234,8 +246,9 @@ has one of each kind.
 
 | Connector | VPN client | Settings |
 | --- | --- | --- |
-| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, eWON, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
+| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
 | `tosibox` | Tosi Client (once TOSIBOX Key), which has no command line: the EasyVPN Gateway app, started by the gateway in a desktop session, starts the client if need be, types its password if it asks, finds the Lock, presses Connect or Disconnect and waits until the client shows it. Its program and password are usually set once, in Settings. | `lock`, `program` |
+| `ecatcher` | Ewon eCatcher (Talk2M), which has no command line: the gateway drives it through its Java's accessibility bridge on a desktop session, signs in to Talk2M, finds the Ewon and connects it. Its account, user and password are usually set once, in Settings. | `ewon`, `account`, `user`, `program` |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
 | `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. `legacy`: `true` allows certificates signed with SHA1 or with short RSA keys (`--tls-cert-profile insecure`), which OpenVPN 2.6 refuses otherwise. | `config`, `user`, `legacy` |
 | `wireguard` | WireGuard for Windows | `config` |
@@ -268,6 +281,23 @@ as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes` em
 is in Layer 2 mode. When it cannot find the Lock or read its state, the app saves what it saw of
 the client to `%LOCALAPPDATA%\EasyVPN\tosi-client.txt` and says so; `"C:\Program Files\EasyVPN
 Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt` on the gateway's desktop writes the same.
+
+**eCatcher.** eCatcher (Ewon's Talk2M client) has no command line either, and is a Java program
+that UI Automation cannot see into, so it is driven through the accessibility bridge of the Java
+it ships with. That Java is 32-bit, so the gateway runs `ecatcher-ui.ps1` (beside it) in 32-bit
+PowerShell, in the desktop session someone is at, with that user's full rights - eCatcher runs as
+administrator, so that user must be one. It switches the bridge on for that user the first time
+(`jabswitch -enable`), starting again an eCatcher already running without it; starts eCatcher if
+it is not running; signs in to Talk2M with the facility's account, user and password (usually set
+once, in *Settings*); searches the list for the Ewon, selects it and presses its Connect (or
+Disconnect), and waits until eCatcher shows it done. Give the facility the Ewon's name exactly as
+eCatcher lists it, and leave `routes` empty: Talk2M adds the Ewon's LAN as a route on the
+*Talk2m-eCatcher* adapter, which the gateway then shares. Give the gateway a Talk2M user of its
+own, as Talk2M signs a user in on one computer at a time; a user with two-factor sign-in signs in
+by hand once on the gateway, ticking *Remember this PC*. An offline Ewon that can be woken by SMS
+is left to a person. When it cannot go on, it saves what eCatcher showed to
+`%LOCALAPPDATA%\EasyVPN\ecatcher.txt`; `ecatcher-ui.ps1 Dump`, run as administrator in
+`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` on the gateway's desktop, writes the same.
 
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a
@@ -340,9 +370,14 @@ a gateway without its *EasyVPN L2* adapter fails straight away, saying so.
 ## Security
 
 - The gateway API needs the access key and is served over TLS with the gateway's own certificate,
-  which workstations pin. The relay uses the same certificate (pinned by gost) and the same key.
-- The relay opens only while a facility is connected, and then only to its `routes` and DNS servers.
-  The Layer 2 port opens only while a Layer 2 facility is connected, behind the same key and certificate.
+  which workstations pin. The relay uses the same certificate (pinned by gost) and the same key, and
+  takes what it carries to the hub and nowhere else.
+- The gateway shares a VPN with the workstations only while its facility is connected, and only that
+  VPN: they reach what the gateway reaches through it, as they would running its client themselves,
+  and nothing else - with nothing shared, their packets stop at the hub. The Layer 2 port opens only
+  while a Layer 2 facility is connected, behind the same key and certificate.
+- Sharing a VPN ends any other Internet Connection Sharing on the gateway: Windows shares one
+  adapter at a time. Keep the gateway for EasyVPN.
 - Keys, the private key and VPN passwords live in `%ProgramData%\EasyVPN`, readable by SYSTEM and
   administrators only; passwords are also DPAPI-encrypted to the gateway machine.
 - The agent's API listens on 127.0.0.1 only, refuses other host names (DNS rebinding) and requires a
@@ -354,9 +389,9 @@ a gateway without its *EasyVPN L2* adapter fails straight away, saying so.
 
 ## Limits
 
-- **TCP and UDP only.** The tunnel carries connections, not packets: `ping` through it does not
-  reach the facility (use the check, or a TCP port). Connections the facility opens towards the
-  workstation are not carried.
+- **Workstation to facility.** The facility sees the gateway, not the workstation, so connections
+  have to start at the workstation: a device cannot open one towards it (a TwinCAT ADS route back
+  to the PC, an active-mode FTP data connection).
 - **Layer 2 only where the VPN has it.** PROFINET DCP discovery and other Ethernet-level protocols
   reach a workstation only from a [Layer 2 facility](#layer-2-facilities), one workstation at a
   time. Through a routed facility, address devices by IP.
@@ -364,10 +399,21 @@ a gateway without its *EasyVPN L2* adapter fails straight away, saying so.
 - **The VPN client must let the gateway's own network in.** Some clients block local network access
   while connected (Cisco's "Allow local LAN access", GlobalProtect's "No direct access to local
   network"). The agent says so when the relay stops answering after a connect.
+- **The tunnel's network, 198.18.0.0/24,** is taken from the benchmarking range, which no facility
+  should be using; one that does cannot be reached there.
 - Overlapping networks: if a facility uses the same subnet as the workstation's own LAN, the facility
   wins while connected; the Activity log warns about it.
 
 ## What has been tested
+
+The packet tunnel (0.4): UDP through gost's relay over TLS, the relay taking it to its one target
+whatever was asked for. Not yet the adapters themselves, Internet Connection Sharing with a VPN's
+adapter, or ping through to a facility: they need administrator rights, a gateway and a VPN, so try
+them on the real gateway first. The gateway app's *Sharing* check says whether sharing can be used.
+
+eCatcher (0.4): reading eCatcher 7.1's sign-in window through its Java's accessibility bridge, and
+the driver starting in 32-bit PowerShell. Not yet signing in, finding an Ewon or connecting it: try
+it on the gateway, and send `ecatcher.txt` when it stops.
 
 On a development PC (not elevated): the gateway end to end with a test connector, covering
 connecting, the relay with the generated certificate pinned by gost, the access key, the whitelist,

@@ -4,10 +4,11 @@ namespace EasyVPN.Gateway;
 /// The one facility connection the gateway carries, shared by every client.
 ///
 /// Connecting first takes down whatever was up, then runs the facility's connector, waits until
-/// the facility answers from here, and only then opens the way in to it - the relay, or for a
-/// Layer 2 facility the Layer 2 port: Connected means the facility was reached, not that a VPN
-/// client turned green. Each request supersedes the one before - an attempt still in progress is
-/// cancelled, and only the newest request is carried out.
+/// the facility answers from here, and only then opens the way in to it - its VPN shared with the
+/// workstations' tunnel (<see cref="Sharing"/>), or for a Layer 2 facility the Layer 2 port:
+/// Connected means the facility was reached, not that a VPN client turned green. Each request
+/// supersedes the one before - an attempt still in progress is cancelled, and only the newest
+/// request is carried out.
 ///
 /// Taking a facility down is only done once its check has stopped answering. Two facilities often
 /// use the same addresses, and a VPN left up underneath would quietly take the next one's traffic.
@@ -16,12 +17,13 @@ namespace EasyVPN.Gateway;
 /// closes until it answers again, so client traffic is blocked rather than sent some other way.
 ///
 /// A routed facility without routes of its own gets the networks its VPN sets up while connecting
-/// (<see cref="VpnRoutes"/>): the relay opens to those, and clients route those.
+/// (<see cref="VpnRoutes"/>): clients route those, and the adapter they lead to is the one shared.
 /// </summary>
 public sealed class ConnectionController(
     FacilityCatalog catalog,
     Connectors connectors,
-    Relay relay,
+    Hub hub,
+    Sharing sharing,
     Layer2Port layer2,
     GatewaySettings settings,
     RecentLog log) : BackgroundService
@@ -38,6 +40,13 @@ public sealed class ConnectionController(
 
     // What the connector last brought up, and so what has to be taken down. Only touched while _busy is held.
     private Facility? _up;
+
+    // The hub's launch its adapter was last shared at, or null when it is not, or -1 when sharing
+    // failed: a later launch made the adapter again, shared with nothing. Only touched while _busy is held.
+    private int? _sharedAt;
+
+    // Why the hub would not start, said once. Only touched while _busy is held.
+    private string? _hubProblem;
 
     private ConnectionState _state = ConnectionState.Disconnected;
     private Facility? _facility;
@@ -126,7 +135,7 @@ public sealed class ConnectionController(
         if (facility.Layer2 && TapAdapter.Find(Defaults.Layer2Adapter) is null)
         {
             Set(request, ConnectionState.Failed,
-                $"{facility.Name} is a Layer 2 facility, and this gateway has no \"{Defaults.Layer2Adapter}\" adapter yet. The EasyVPN Gateway app on the gateway sets it up.");
+                $"{facility.Name} is set to Layer 2, which needs an \"{Defaults.Layer2Adapter}\" adapter on the gateway, bridged with its VPN client's Layer 2 adapter, and this gateway has none. Add it in the EasyVPN Gateway app on the gateway, or turn Layer 2 off for {facility.Name} in the facility editor.");
             return;
         }
 
@@ -174,7 +183,15 @@ public sealed class ConnectionController(
         {
             if (request == _request) _routes = facility.Layer2 ? null : routes;
         }
-        OpenWayIn(facility);
+        try
+        {
+            await OpenWayInAsync(facility, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await FailAsync(request, ex.Message);
+            return;
+        }
         Set(request, ConnectionState.Connected, $"Connected to {facility.Name}");
     }
 
@@ -201,25 +218,41 @@ public sealed class ConnectionController(
         await TearDownAsync(request);
     }
 
-    /// <summary>How clients reach a connected facility: the relay for a routed one, the Layer 2 port for a bridged one.</summary>
-    private void OpenWayIn(Facility facility)
+    /// <summary>
+    /// How clients reach a connected facility: for a routed one, the adapter its networks lead to -
+    /// its VPN's - shared with the tunnel; for a bridged one, the Layer 2 port.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The VPN could not be shared.</exception>
+    private async Task OpenWayInAsync(Facility facility, CancellationToken ct)
     {
+        if (facility.Layer2)
+        {
+            layer2.Open();
+            return;
+        }
         IReadOnlyList<string> routes;
         lock (_sync) routes = _routes ?? facility.Routes;
-        if (facility.Layer2) layer2.Open();
-        else relay.Open(facility, routes);
+        var vpn = Sharing.Carrying(routes)
+            ?? throw new InvalidOperationException($"This gateway has no route to {string.Join(", ", routes)} to share with the workstations.");
+        var launch = hub.Launches;
+        // Marked first, so a share that fails halfway is undone all the same, and tried again.
+        _sharedAt = -1;
+        await sharing.ShareAsync(vpn, ct);
+        _sharedAt = launch;
     }
 
-    private void CloseWayIn()
+    private async Task CloseWayInAsync()
     {
-        relay.Close();
         layer2.Close();
+        if (_sharedAt is null) return;
+        _sharedAt = null;
+        await sharing.UnshareAsync();
     }
 
     /// <summary>Closes the way in and disconnects what is up. False, and Failed, if it still answers.</summary>
     private async Task<bool> TearDownAsync(int request)
     {
-        CloseWayIn();
+        await CloseWayInAsync();
         if (_up is not { } facility) return true;
 
         await connectors.RunAsync(facility, "Disconnect", CancellationToken.None);
@@ -255,6 +288,19 @@ public sealed class ConnectionController(
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
+        // The tunnel runs as long as the gateway does. Sharing left over from before - a crash, a
+        // restart of Windows - carries nothing any more.
+        await _busy.WaitAsync(stop);
+        try
+        {
+            StartHub();
+            await sharing.UnshareAsync();
+        }
+        finally
+        {
+            _busy.Release();
+        }
+
         using var timer = new PeriodicTimer(CheckInterval);
         var misses = 0;
         while (await timer.WaitForNextTickAsync(stop))
@@ -263,10 +309,25 @@ public sealed class ConnectionController(
             if (!await _busy.WaitAsync(0, stop)) continue;
             try
             {
+                if (!hub.IsRunning) StartHub();
+
                 Facility? facility;
                 ConnectionState state;
                 int request;
                 lock (_sync) (facility, state, request) = (_facility, _state, _request);
+
+                // gost started again, and made its adapter again: shared with nothing.
+                if (facility is not null && state == ConnectionState.Connected && _sharedAt is { } shared && shared != hub.Launches)
+                {
+                    try
+                    {
+                        await OpenWayInAsync(facility, stop);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        log.Add(ex.Message);
+                    }
+                }
 
                 if (facility?.Check is not { } check || state is not (ConnectionState.Connected or ConnectionState.Interrupted))
                 {
@@ -279,13 +340,20 @@ public sealed class ConnectionController(
                     misses = 0;
                     if (state == ConnectionState.Interrupted)
                     {
-                        OpenWayIn(facility);
-                        Set(request, ConnectionState.Connected, $"{facility.Name} answers again");
+                        try
+                        {
+                            await OpenWayInAsync(facility, stop);
+                            Set(request, ConnectionState.Connected, $"{facility.Name} answers again");
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            log.Add(ex.Message);
+                        }
                     }
                 }
                 else if (state == ConnectionState.Connected && ++misses >= MissesBeforeInterrupted)
                 {
-                    CloseWayIn();
+                    await CloseWayInAsync();
                     Set(request, ConnectionState.Interrupted, $"{check} stopped answering. Traffic is blocked until it answers again.");
                 }
             }
@@ -296,7 +364,26 @@ public sealed class ConnectionController(
         }
     }
 
-    /// <summary>A stopped gateway carries nothing: the relay closes and the VPN is disconnected.</summary>
+    /// <summary>
+    /// Starts the tunnel's end here. One that cannot start - gost.exe gone, say, taken by an
+    /// antivirus - is said once, and tried again every few seconds; the gateway runs on meanwhile.
+    /// </summary>
+    private void StartHub()
+    {
+        try
+        {
+            hub.Start();
+            _hubProblem = null;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        {
+            var problem = $"The tunnel for the workstations could not be started: {ex.Message}";
+            if (problem != _hubProblem) log.Add(problem);
+            _hubProblem = problem;
+        }
+    }
+
+    /// <summary>A stopped gateway carries nothing: the VPN is no longer shared, and is disconnected.</summary>
     public override async Task StopAsync(CancellationToken ct)
     {
         int request;
@@ -308,5 +395,6 @@ public sealed class ConnectionController(
         await base.StopAsync(ct);
         await _busy.WaitAsync(ct);
         await TearDownAsync(request);
+        hub.Stop();
     }
 }

@@ -3,7 +3,8 @@
     SYSTEM:  network.ps1 Apply | Clear | Prepare
 
     Prepare is for a new adapter, each time gost makes one: NetBIOS off, so Windows' name
-    broadcasts do not try to go through the tunnel.
+    broadcasts do not try to go through the tunnel; and the network Windows sees on it named
+    EasyVPN, the ones it remembered for earlier adapters gone.
 
     EASYVPN_OLD_ROUTES    routes to remove first, comma separated (what was routed before)
     EASYVPN_ROUTES        the facility's networks, routed to the adapter              (Apply)
@@ -34,6 +35,30 @@ if ($Action -eq 'Prepare') {
     # 2: NetBIOS over TCP/IP off. 0 is done, 1 done after a restart.
     $result = Invoke-CimMethod -InputObject $config -MethodName SetTcpipNetbios -Arguments @{ TcpipNetbiosOptions = [uint32]2 }
     if ($result.ReturnValue -gt 1) { throw "Windows answered $($result.ReturnValue)." }
+
+    # Windows names a network it has not seen after its adapter, numbered when the name is taken:
+    # "EasyVPN 12" after eleven adapters made with new identities. The adapter keeps one identity
+    # now, so the networks remembered for the others go, and its own is called EasyVPN again.
+    for ($i = 0; -not ($network = Get-NetConnectionProfile -InterfaceAlias $adapter -ErrorAction SilentlyContinue); $i++) {
+        if ($i -ge 40) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    $list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList'
+    foreach ($key in Get-ChildItem "$list\Profiles") {
+        $name = (Get-ItemProperty $key.PSPath).ProfileName
+        if ($name -notmatch "^$adapter( \d+)?$") { continue }
+        if ($name -eq $network.Name) {
+            if ($name -ne $adapter) {
+                Set-ItemProperty $key.PSPath -Name ProfileName -Value $adapter
+                Set-ItemProperty $key.PSPath -Name Description -Value $adapter
+            }
+            continue
+        }
+        Get-ChildItem "$list\Signatures\Unmanaged" -ErrorAction SilentlyContinue |
+            Where-Object { (Get-ItemProperty $_.PSPath).ProfileGuid -eq $key.PSChildName } |
+            Remove-Item -Recurse
+        Remove-Item $key.PSPath -Recurse
+    }
     return
 }
 

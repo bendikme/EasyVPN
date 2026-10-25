@@ -130,6 +130,9 @@ public sealed record AgentStatus(
     IReadOnlyList<LogLine> Log,
     UpdateStatus? Update = null);
 
+/// <summary>A workstation's address on the tunnel, which the gateway keeps for it: the same one each time.</summary>
+public sealed record TunnelLease(string Address, int PrefixLength);
+
 public sealed record AgentSettingsView(string? Gateway, bool HasAccessKey, string? Thumbprint);
 
 /// <summary>A null or empty access key keeps the current one.</summary>
@@ -151,6 +154,31 @@ public static class Defaults
     public const string CertificateName = "easyvpn-gateway";
 
     public const string RelayUser = "easyvpn";
+
+    /// <summary>
+    /// The tunnel's own network, from the benchmarking range no facility should be using. The
+    /// gateway's end has <see cref="TunnelHub"/>; each workstation gets an address of its own.
+    /// </summary>
+    public static readonly System.Net.IPNetwork TunnelNetwork = System.Net.IPNetwork.Parse("198.18.0.0/24");
+
+    public const string TunnelHub = "198.18.0.1";
+
+    /// <summary>Where the gateway's end of the tunnel takes packets, from its relay only.</summary>
+    public const int TunnelHubPort = 8422;
+
+    /// <summary>Room for the TLS and TCP the packets travel in, and for the facility's VPN after that.</summary>
+    public const int TunnelMtu = 1380;
+
+    /// <summary>
+    /// The workstation's adapter, and the fixed identity it is made with each time: with a new one,
+    /// Windows takes it for a network it has not seen and numbers its name ("EasyVPN 12").
+    /// </summary>
+    public const string TunnelAdapter = "EasyVPN";
+    public const string TunnelAdapterGuid = "{EE9A2589-4133-47FA-9858-85601C3D689D}";
+
+    /// <summary>The gateway's adapter, where the workstations' packets come out. gost wants no spaces in it.</summary>
+    public const string GatewayAdapter = "EasyVPN-Gateway";
+    public const string GatewayAdapterGuid = "{C6D4DDD3-E5F6-4BD5-BCA7-B8812077DA93}";
 
     /// <summary>The TAP adapter that carries a Layer 2 facility, on the workstation and on the gateway.</summary>
     public const string Layer2Adapter = "EasyVPN L2";

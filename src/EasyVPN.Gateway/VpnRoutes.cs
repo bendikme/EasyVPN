@@ -76,6 +76,8 @@ public static class VpnRoutes
         [
             .. added
                 .Where(r => r.PrefixLength >= 8)
+                // The tunnel's own, should its adapter have been made again meanwhile.
+                .Where(r => !Defaults.TunnelNetwork.Contains(r.Destination))
                 .Where(r => !Multicast.Contains(r.Destination) && !IPAddress.IsLoopback(r.Destination) && !r.Destination.Equals(IPAddress.Broadcast))
                 // A host route stays only when it is one the VPN pushed: not this machine's own
                 // address, nor the broadcast address of a network beside it.

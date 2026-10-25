@@ -128,9 +128,9 @@
   </Package>
 
   <Fragment>
-    <!-- Everything else publish.ps1 put in the folder (gost, the connectors, layer2.ps1, the sample
-         facilities, the licences), harvested at build time so a new file is packaged without
-         listing it here. -->
+    <!-- Everything else publish.ps1 put in the folder (gost, Wintun, the connectors, sharing.ps1,
+         layer2.ps1, the sample facilities, the licences), harvested at build time so a new file
+         is packaged without listing it here. -->
     <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.PublishDir)\**">
         <Exclude Files="$(var.PublishDir)\EasyVPN.Gateway.exe" />

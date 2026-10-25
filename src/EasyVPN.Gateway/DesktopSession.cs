@@ -7,9 +7,10 @@ using Microsoft.Win32.SafeHandles;
 namespace EasyVPN.Gateway;
 
 /// <summary>
-/// Runs the EasyVPN Gateway app in a signed-in user's desktop session, for what only works there:
-/// driving a VPN client's window. The service runs as SYSTEM, which may start a process as the user
-/// of any session; its connectors reach this as <c>EasyVPN.Gateway.exe desktop &lt;app arguments&gt;</c>.
+/// Runs the EasyVPN Gateway app - or, with <c>--program</c>, another program - in a signed-in user's
+/// desktop session, for what only works there: driving a VPN client's window. The service runs as
+/// SYSTEM, which may start a process as the user of any session; its connectors reach this as
+/// <c>EasyVPN.Gateway.exe desktop &lt;app arguments&gt;</c>.
 /// Sessions are tried console first, and an app that found nothing to drive in one (exit code
 /// <see cref="NotHere"/>) is tried in the next; when none had it, so does this. What it prints
 /// comes back, and its exit code.
@@ -28,17 +29,13 @@ public static class DesktopSession
     /// Remote Desktop), as nothing can be typed into the others;
     /// <c>--close-elsewhere PREFIX</c>, programs whose names start so are closed in every other
     /// session before the app runs: a VPN client left on a desktop nobody uses, which would keep
-    /// another copy from starting.
+    /// another copy from starting;
+    /// <c>--program PATH</c>, that program runs instead of the app, with the rest as its arguments:
+    /// a script in 32-bit PowerShell, say, for a client only a 32-bit program can reach.
     /// </param>
     public static int RunApp(string[] args, TimeSpan timeout)
     {
         var app = Path.Combine(AppContext.BaseDirectory, "EasyVPN.GatewayApp.exe");
-        if (!File.Exists(app))
-        {
-            Console.WriteLine($"The EasyVPN Gateway app is not beside the gateway ({app}).");
-            return 1;
-        }
-
         var usableOnly = false;
         string? closeElsewhere = null;
         var rest = new List<string>(args);
@@ -50,10 +47,20 @@ public static class DesktopSession
                 closeElsewhere = rest[1];
                 rest.RemoveAt(0);
             }
+            else if (rest[0] == "--program" && rest.Count > 1)
+            {
+                app = rest[1];
+                rest.RemoveAt(0);
+            }
             else break;
             rest.RemoveAt(0);
         }
         args = [.. rest];
+        if (!File.Exists(app))
+        {
+            Console.WriteLine($"{Path.GetFileName(app)} is not where the gateway looked for it ({app}).");
+            return 1;
+        }
 
         var tried = false;
         foreach (var (session, active, locked) in Sessions())
@@ -237,7 +244,7 @@ public static class DesktopSession
                 if (WaitForSingleObject(process.Process, (uint)timeout.TotalMilliseconds) != 0)
                 {
                     TerminateProcess(process.Process, 1);
-                    Console.WriteLine($"The EasyVPN Gateway app was stopped after {timeout.TotalSeconds:0} s.");
+                    Console.WriteLine($"{Path.GetFileNameWithoutExtension(app)} was stopped after {timeout.TotalSeconds:0} s.");
                     return 1;
                 }
                 relay.Wait(TimeSpan.FromSeconds(5));

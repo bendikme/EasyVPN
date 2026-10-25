@@ -15,7 +15,7 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
 
     public string Link => Info.Layer2
         ? $"Layer 2: the facility's LAN, on this PC's \"{Defaults.Layer2Adapter}\" adapter"
-        : "Routed: TCP and UDP to the networks below";
+        : $"Routed: the networks below, on this PC's \"{Defaults.TunnelAdapter}\" adapter";
     public string? Dns => Info.Dns is { Domains.Count: > 0 } dns ? $"{string.Join(", ", dns.Domains)} via {string.Join(", ", dns.Servers)}" : null;
     public string? Check => Info.Check;
     public string? Notes => Info.Notes;

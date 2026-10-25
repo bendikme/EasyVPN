@@ -57,7 +57,9 @@ builder.Services.AddSingleton(services =>
 });
 builder.Services.AddSingleton<FacilityCatalog>();
 builder.Services.AddSingleton<Connectors>();
-builder.Services.AddSingleton<Relay>();
+builder.Services.AddSingleton<Hub>();
+builder.Services.AddSingleton<Sharing>();
+builder.Services.AddSingleton<TunnelAddresses>();
 builder.Services.AddSingleton<Layer2Port>();
 builder.Services.AddSingleton<GatewayChecks>();
 builder.Services.AddSingleton<ConnectionController>();
@@ -98,6 +100,8 @@ var api = app.MapGroup("/api");
 api.Map("/layer2", (HttpContext context, Layer2Port port) => port.RunAsync(context, ClientOf(context.Request)));
 api.MapGet("/facilities", (FacilityCatalog catalog) => catalog.All().Select(f => f.ToInfo()));
 api.MapGet("/status", (ConnectionController controller) => controller.Status);
+// The workstation's address on the tunnel: the same each time.
+api.MapPost("/tunnel", (HttpRequest request, TunnelAddresses addresses) => addresses.For(ClientOf(request)));
 api.MapPost("/connect/{id}", (string id, HttpRequest request, ConnectionController controller) =>
     controller.Connect(id, ClientOf(request)) ? Results.Ok(controller.Status) : Results.NotFound());
 api.MapPost("/disconnect", (HttpRequest request, ConnectionController controller) =>
@@ -174,7 +178,8 @@ static void PrintInfo()
           {certificate.Thumbprint}
 
         Facilities are defined in {Path.Combine(GatewaySettings.Folder, "facilities.json")}
-        Clients also need TCP {settings.ApiPort} and {settings.RelayPort} open to this machine.
+        Clients also need TCP {settings.ApiPort} and {settings.RelayPort} open to this machine. They reach a
+        connected facility through Windows' Internet Connection Sharing, which shares its VPN with them.
         The EasyVPN Gateway app, in the Start menu, shows all of this and how the gateway is doing.
         """);
 }

@@ -128,7 +128,7 @@ public static partial class TosiClient
                 }
 
                 var before = state;
-                var clicked = Press(Look(window), row, state);
+                var clicked = Press(handle, Look(window), row, state);
                 say(connect ? $"Pressed Connect for {name} in Tosi Client{(clicked ? ", with the mouse, as it shows no button UI Automation sees" : "")}."
                     : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
                     : $"Pressed Disconnect for {name} in Tosi Client ({state.Why}).");
@@ -142,8 +142,22 @@ public static partial class TosiClient
                     var seen = Look(window);
                     if (Row(seen, name) is { } line && Read(seen, line) is var current && Target(seen, line, current) is { } at)
                     {
-                        Click(at);
+                        Click(handle, at);
                         say($"Tosi Client did not take the press, so the button was clicked with the mouse.");
+                    }
+                }
+                // A click that plainly did not take - ten seconds on, the row still says it is ready to
+                // connect, and nothing else has changed - is made once more. Any other change, and it
+                // took: a second click then would undo it.
+                else if (clicked && connect && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(10))
+                         && Now(window, name) is { Connected: false, Connecting: false } still && NotConnected().IsMatch(still.Status))
+                {
+                    Front(handle);
+                    var seen = Look(window);
+                    if (Row(seen, name) is { } line && Target(seen, line, Read(seen, line)) is { } at)
+                    {
+                        Click(handle, at);
+                        say($"Tosi Client still showed {name} ready to connect, so Connect was clicked once more.");
                     }
                 }
             }
@@ -358,7 +372,7 @@ public static partial class TosiClient
             code = 1;
             return false;
         }
-        if (ok is not null) Press(ok);
+        if (ok is not null) Press(handle, ok);
         else PressKey(0x0D); // Enter
 
         if (!WaitUntil(() => FindWindow(PasswordTitle()) == IntPtr.Zero, Settle))
@@ -487,7 +501,7 @@ public static partial class TosiClient
         {
             try
             {
-                Click(new Point(item.Rect.Left + Math.Min(40, item.Rect.Width / 2), item.Rect.Top + item.Rect.Height / 2));
+                Click(handle, new Point(item.Rect.Left + Math.Min(40, item.Rect.Width / 2), item.Rect.Top + item.Rect.Height / 2));
                 if (GetForegroundWindow() == handle)
                 {
                     Type(name);
@@ -594,7 +608,7 @@ public static partial class TosiClient
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
     /// <returns>True when it was a click with the mouse, rather than UI Automation's press.</returns>
-    private static bool Press(List<Seen> seen, Seen row, State state)
+    private static bool Press(IntPtr window, List<Seen> seen, Seen row, State state)
     {
         if (state.Button is { } button && button.Element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
@@ -603,11 +617,11 @@ public static partial class TosiClient
         }
         var at = Target(seen, row, state)
             ?? throw new InvalidOperationException("Tosi Client shows no Connect button, and no Connection column to find one in.");
-        Click(at);
+        Click(window, at);
         return true;
     }
 
-    private static void Press(AutomationElement button)
+    private static void Press(IntPtr window, AutomationElement button)
     {
         if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
@@ -615,7 +629,7 @@ public static partial class TosiClient
             return;
         }
         var r = button.Current.BoundingRectangle;
-        Click(new Point(r.Left + r.Width / 2, r.Top + r.Height / 2));
+        Click(window, new Point(r.Left + r.Width / 2, r.Top + r.Height / 2));
     }
 
     /// <summary>The search box: one that says so, or else the box shown highest (and furthest right) in the window.</summary>
@@ -650,7 +664,7 @@ public static partial class TosiClient
             // A click focuses the box as surely as a person's, and brings the window to the front
             // with it; UI Automation's focus as well, should the click not get there.
             var r = box.Current.BoundingRectangle;
-            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2));
+            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(window, new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2));
             if (GetForegroundWindow() != window) Front(window);
             box.SetFocus();
             if (GetForegroundWindow() == window)
@@ -855,18 +869,56 @@ public static partial class TosiClient
         return GetForegroundWindow() == handle;
     }
 
-    private static void Click(Point at)
+    /// <summary>
+    /// A click as a person makes it: the pointer moved there, a moment for it to be noticed - a
+    /// client that draws its own buttons may take a click only on one it has seen the pointer over -
+    /// then a press and, a moment later, a release.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Another window is over the window there: no click, as it would land on that.</exception>
+    private static void Click(IntPtr window, Point at)
     {
-        SetCursorPos((int)at.X, (int)at.Y);
-        Send(Mouse(0x0002), Mouse(0x0004)); // left down, left up
+        // Only ever on the client: brought to the front just before, and the click made only where
+        // Windows says it is the window there - otherwise it lands on whatever is in front.
+        Front(window);
+        if (!Over(window, at))
+        {
+            Thread.Sleep(300);
+            Front(window);
+            if (!Over(window, at))
+                throw new InvalidOperationException($"Another window is over Tosi Client where it was to be clicked ({at.X:0},{at.Y:0}), so nothing was clicked.");
+        }
+        SetCursorPos((int)at.X - 3, (int)at.Y);
+        Thread.Sleep(50);
+        Send(Move(1, 0), Move(1, 0), Move(1, 0)); // arrives, as a hand's would
+        Thread.Sleep(350);
+        Send(Mouse(0x0002)); // left down
+        Thread.Sleep(90);
+        Send(Mouse(0x0004)); // left up
         Thread.Sleep(250);
     }
 
-    private static void TryClick(Point at)
+    /// <summary>Whether the window at a point on the screen is (part of) <paramref name="window"/>.</summary>
+    private static bool Over(IntPtr window, Point at) => GetAncestor(WindowFromPoint(new NativePoint { X = (int)at.X, Y = (int)at.Y }), 2 /* GA_ROOT */) == window;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X, Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+
+    private static Input Move(int dx, int dy) => new() { Type = 0, Union = new InputUnion { Mouse = new MouseInput { X = dx, Y = dy, Flags = 0x0001 } } };
+
+    private static void TryClick(IntPtr window, Point at)
     {
         try
         {
-            Click(at);
+            Click(window, at);
         }
         catch (InvalidOperationException)
         {
