@@ -178,7 +178,7 @@ with its window open).
 
 - **Automatically** only while nothing is connected: on a workstation, no facility; on the gateway,
   no facility for anyone. Otherwise it waits, trying again every quarter of an hour.
-- **By hand:** the workstation app's status strip and the gateway app's *This gateway* card show
+- **By hand:** the status strip at the foot of the workstation app and of the gateway app shows
   the version and a button, *Check for updates*, which turns into *Install 1.2.3* when there is
   one. Installing by hand while connected asks first, since it disconnects.
 - `updates.json` in the service's data folder (`%ProgramData%\EasyVPN\Client` or `\Gateway`) turns

@@ -32,7 +32,7 @@ public static class DesktopSession
         }
 
         var tried = false;
-        foreach (var session in Sessions())
+        foreach (var (session, active) in Sessions())
         {
             if (!WTSQueryUserToken(session, out var token))
             {
@@ -41,6 +41,8 @@ public static class DesktopSession
                 continue; // Nobody signed in there.
             }
             tried = true;
+            // Whose desktop, so what follows can be told apart in the gateway's activity.
+            Console.WriteLine($"On {Describe(session)}'s desktop (session {session}, {(active ? Station(session) : "disconnected")}):");
             int code;
             using (var user = new SafeAccessTokenHandle(token))
             using (var full = Elevated(user))
@@ -67,12 +69,14 @@ public static class DesktopSession
         return SafeAccessTokenHandle.InvalidHandle;
     }
 
-    /// <summary>The console's session first, then the others with someone signed in, connected or not.</summary>
-    private static List<uint> Sessions()
+    /// <summary>
+    /// The sessions with someone in them, those someone is at first - the console's, then Remote
+    /// Desktop's - and those left disconnected last: a client started there would be out of
+    /// everyone's sight, and could not be typed into.
+    /// </summary>
+    private static List<(uint Session, bool Active)> Sessions()
     {
-        var sessions = new List<uint>();
-        var console = WTSGetActiveConsoleSessionId();
-        if (console != uint.MaxValue) sessions.Add(console);
+        var sessions = new List<(uint Session, bool Active)>();
         if (WTSEnumerateSessions(IntPtr.Zero, 0, 1, out var list, out var count))
         {
             try
@@ -81,8 +85,7 @@ public static class DesktopSession
                 for (var i = 0; i < count; i++)
                 {
                     var info = Marshal.PtrToStructure<WtsSessionInfo>(list + i * size);
-                    if (info.SessionId != 0 && info.State is WtsActive or WtsDisconnected && !sessions.Contains(info.SessionId))
-                        sessions.Add(info.SessionId);
+                    if (info.SessionId != 0 && info.State is WtsActive or WtsDisconnected) sessions.Add((info.SessionId, info.State == WtsActive));
                 }
             }
             finally
@@ -90,7 +93,33 @@ public static class DesktopSession
                 WTSFreeMemory(list);
             }
         }
-        return sessions;
+        var console = WTSGetActiveConsoleSessionId();
+        return [.. sessions.OrderByDescending(s => s.Active).ThenByDescending(s => s.Session == console)];
+    }
+
+    /// <summary>The user signed in to a session, as DOMAIN\name.</summary>
+    private static string Describe(uint session)
+    {
+        var user = Query(session, WtsUserName);
+        var domain = Query(session, WtsDomainName);
+        return string.IsNullOrEmpty(domain) ? user : $@"{domain}\{user}";
+    }
+
+    /// <summary>Where a session is shown: the console, or Remote Desktop.</summary>
+    private static string Station(uint session) =>
+        Query(session, WtsWinStationName) is { Length: > 0 } name && !name.Equals("Console", StringComparison.OrdinalIgnoreCase) ? "Remote Desktop" : "the console";
+
+    private static string Query(uint session, int info)
+    {
+        if (!WTSQuerySessionInformation(IntPtr.Zero, session, info, out var buffer, out _)) return "";
+        try
+        {
+            return Marshal.PtrToStringUni(buffer) ?? "";
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
     }
 
     private static int RunAs(SafeAccessTokenHandle token, string app, string[] args, TimeSpan timeout)
@@ -219,6 +248,7 @@ public static class DesktopSession
 
     private const int WtsActive = 0;
     private const int WtsDisconnected = 4;
+    private const int WtsWinStationName = 6, WtsUserName = 5, WtsDomainName = 7;
     private const uint HandleFlagInherit = 1;
     private const int StartfUseStdHandles = 0x100;
     private const uint CreateUnicodeEnvironment = 0x400;
@@ -267,6 +297,9 @@ public static class DesktopSession
 
     [DllImport("wtsapi32.dll")]
     private static extern void WTSFreeMemory(IntPtr memory);
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool WTSQuerySessionInformation(IntPtr server, uint session, int info, out IntPtr buffer, out int bytes);
 
     [DllImport("wtsapi32.dll", SetLastError = true)]
     private static extern bool WTSQueryUserToken(uint session, out IntPtr token);

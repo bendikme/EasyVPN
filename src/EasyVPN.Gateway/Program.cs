@@ -17,7 +17,7 @@ switch (args)
     case ["desktop", .. var rest]:
         try
         {
-            return DesktopSession.RunApp([.. rest], TimeSpan.FromSeconds(100));
+            return DesktopSession.RunApp([.. rest], TimeSpan.FromMinutes(4));
         }
         catch (Exception ex)
         {

@@ -14,7 +14,8 @@ namespace EasyVPN.Gateway;
 /// </summary>
 public sealed class Connectors(RecentLog log)
 {
-    private static readonly TimeSpan Limit = TimeSpan.FromMinutes(2);
+    // Long enough for a client that is started, signed in to and waited for (Tosi Client).
+    private static readonly TimeSpan Limit = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CheckLimit = TimeSpan.FromSeconds(30);
 
     private readonly string _sharedPath = Path.Combine(GatewaySettings.Folder, SharedSettings.FileName);

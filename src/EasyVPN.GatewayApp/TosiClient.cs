@@ -32,7 +32,8 @@ public static partial class TosiClient
     public const int NotHere = 3;
 
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan Connecting = TimeSpan.FromSeconds(75);
+    // A Lock can take a while; the gateway gives the whole connector longer than this.
+    private static readonly TimeSpan Connecting = TimeSpan.FromSeconds(150);
 
     public static string DumpPath { get; } = Path.Combine(Path.GetDirectoryName(CrashLog.Path)!, "tosi-client.txt");
 
@@ -75,7 +76,7 @@ public static partial class TosiClient
         var handle = FindWindow(MainTitle());
         if (handle == IntPtr.Zero)
         {
-            say("Tosi Client is not running on this desktop.");
+            say($"Tosi Client is not running on this desktop.{Nearby()}");
             return NotHere;
         }
         Front(handle);
@@ -91,19 +92,26 @@ public static partial class TosiClient
             }
 
             var state = Read(Look(window), row);
-            if (state.Connected == connect)
+            if (state.Connected == connect && !state.Connecting)
             {
                 say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
                 return 0;
             }
-            if (connect && state.Button is { Enabled: false })
+            if (connect && state.Connecting)
+                say($"Tosi Client is connecting {name} already.");
+            else if (connect && state.Button is { Enabled: false })
             {
                 say($"{name} cannot be connected: {state.Status}");
                 return 1;
             }
-
-            Press(Look(window), row, state);
-            say($"Pressed {(connect ? "Connect" : "Disconnect")} for {name} in Tosi Client.");
+            else
+            {
+                // Disconnecting one still connecting is cancelling it, with whatever its button is then.
+                Press(Look(window), row, state);
+                say(connect ? $"Pressed Connect for {name} in Tosi Client."
+                    : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
+                    : $"Pressed Disconnect for {name} in Tosi Client.");
+            }
 
             // Done when the client says so: its button turns, its status follows. Its list changes
             // meanwhile (a connected Lock shows its devices), so a moment it cannot be read is skipped.
@@ -116,7 +124,7 @@ public static partial class TosiClient
                     var seen = Look(window);
                     if (Row(seen, name) is not { } now) continue;
                     state = Read(seen, now);
-                    if (state.Connected == connect)
+                    if (state.Connected == connect && !state.Connecting)
                     {
                         say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
                         return 0;
@@ -158,7 +166,9 @@ public static partial class TosiClient
         say($"Starting Tosi Client ({program}).");
         try
         {
-            Process.Start(new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(program) })?.Dispose();
+            // Started in its own folder, as a shortcut would; a shortcut given instead starts it its own way.
+            var shortcut = program.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
+            Process.Start(new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = shortcut ? "" : Path.GetDirectoryName(program) })?.Dispose();
         }
         catch (Win32Exception ex)
         {
@@ -429,12 +439,13 @@ public static partial class TosiClient
         }
     }
 
-    private sealed record State(bool Connected, Seen? Button, string Status);
+    /// <param name="Connecting">Neither yet: the client is still at it, and says so (or offers to cancel).</param>
+    private sealed record State(bool Connected, bool Connecting, Seen? Button, string Status);
 
     /// <summary>
     /// What the client shows on the row: its button, if it is one UI Automation sees, and its status.
     /// A button out of view does not count - the client may keep the one it replaced - and of a
-    /// Connect and a Disconnect both shown, Disconnect does.
+    /// Connect and a Disconnect both shown, Disconnect does; of a Cancel, that it is still connecting.
     /// </summary>
     private static State Read(List<Seen> seen, Seen row)
     {
@@ -444,7 +455,9 @@ public static partial class TosiClient
         bool OnLine(Seen s) => s.Visible && s.Rect.Top + s.Rect.Height / 2 >= top && s.Rect.Top + s.Rect.Height / 2 <= bottom;
 
         var buttons = seen.Where(s => s.Type == ControlType.Button && OnLine(s) && ConnectButton().IsMatch(s.Name.Trim())).ToList();
-        var button = buttons.FirstOrDefault(b => b.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)) ?? buttons.FirstOrDefault();
+        var button = buttons.FirstOrDefault(b => b.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase))
+            ?? buttons.FirstOrDefault(b => b.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
+            ?? buttons.FirstOrDefault();
         var status = string.Join(" ", seen
             .Where(s => s.Type != ControlType.Button && s.Type != ControlType.Edit && OnLine(s))
             .Select(s => s.Name.Trim())
@@ -452,10 +465,11 @@ public static partial class TosiClient
             .Where(text => text.Length > 0 && !string.Equals(text, row.Name.Trim(), StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
             .Distinct());
 
-        var connected = button is not null
+        var connecting = button?.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase) == true || ConnectingNow().IsMatch(status);
+        var connected = !connecting && (button is not null
             ? button.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)
-            : Connected().IsMatch(status) && !NotConnected().IsMatch(status);
-        return new State(connected, button, status);
+            : Connected().IsMatch(status) && !NotConnected().IsMatch(status));
+        return new State(connected, connecting, button, status);
     }
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
@@ -620,8 +634,11 @@ public static partial class TosiClient
     [GeneratedRegex(@"^(Tosi|TOSIBOX)\b.*password", RegexOptions.IgnoreCase)]
     private static partial Regex PasswordTitle();
 
-    [GeneratedRegex(@"^(Dis)?connect$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^((Dis)?connect|Cancel)$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectButton();
+
+    [GeneratedRegex(@"\bconnecting\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ConnectingNow();
 
     /// <summary>Tosi, TOSIBOX, TosiboxKey …</summary>
     [GeneratedRegex(@"\btosi", RegexOptions.IgnoreCase)]
@@ -639,6 +656,26 @@ public static partial class TosiClient
 
     [GeneratedRegex(@"\b(not|dis)\s*connected\b|ready to connect", RegexOptions.IgnoreCase)]
     private static partial Regex NotConnected();
+
+    /// <summary>
+    /// What there is of Tosi on this desktop when its windows are not as expected: the titles of
+    /// windows, and the programs, named for it - " Here: …", or nothing.
+    /// </summary>
+    private static string Nearby()
+    {
+        var titles = new List<string>();
+        EnumWindows((handle, _) =>
+        {
+            var text = new StringBuilder(256);
+            GetWindowText(handle, text, text.Capacity);
+            if (Product().IsMatch(text.ToString())) titles.Add($"\"{text}\"{(IsWindowVisible(handle) ? "" : " (hidden)")}");
+            return true;
+        }, IntPtr.Zero);
+        var session = Process.GetCurrentProcess().SessionId;
+        var programs = Process.GetProcesses().Where(p => p.SessionId == session && Product().IsMatch(p.ProcessName)).Select(p => p.ProcessName).Distinct().ToList();
+        if (titles.Count == 0 && programs.Count == 0) return "";
+        return $" Here: windows {(titles.Count > 0 ? string.Join(", ", titles.Distinct()) : "none")}; programs {(programs.Count > 0 ? string.Join(", ", programs) : "none")}.";
+    }
 
     /// <summary>A top-level window by its title, shown or not: the client may sit hidden in the notification area.</summary>
     private static IntPtr FindWindow(Regex title)

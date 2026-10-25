@@ -1,20 +1,11 @@
 using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Shell;
 
 namespace EasyVPN;
 
 public partial class MainWindow : Window
 {
-    private const int SmCxFrame = 32;
-    private const int SmCyFrame = 33;
-    private const int SmCxPaddedBorder = 92;
-    private const double CaptionHeight = 44;
-
     private readonly MainViewModel _model;
     private readonly AgentClient _agent;
     private bool _exiting;
@@ -72,11 +63,7 @@ public partial class MainWindow : Window
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
 
-    private void OnMaximizeClick(object sender, RoutedEventArgs e)
-    {
-        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
-        else SystemCommands.MaximizeWindow(this);
-    }
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => WindowFrame.ToggleMaximized(this);
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
 
@@ -98,30 +85,5 @@ public partial class MainWindow : Window
         FitMaximized();
     }
 
-    /// <summary>
-    /// Windows makes a maximized window larger than the screen by its frame, which a window
-    /// without one would lose off every edge; pull the content in by that much (from DynatecRDM).
-    /// </summary>
-    private void FitMaximized()
-    {
-        var inset = new Thickness(0);
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (WindowState == WindowState.Maximized && hwnd != 0)
-        {
-            var dpi = GetDpiForWindow(hwnd);
-            var padded = GetSystemMetricsForDpi(SmCxPaddedBorder, dpi);
-            var scale = VisualTreeHelper.GetDpi(this);
-            var x = (GetSystemMetricsForDpi(SmCxFrame, dpi) + padded) / scale.DpiScaleX;
-            var y = (GetSystemMetricsForDpi(SmCyFrame, dpi) + padded) / scale.DpiScaleY;
-            inset = new Thickness(x, y, x, y);
-        }
-        Root.Margin = inset;
-        if (WindowChrome.GetWindowChrome(this) is { } chrome) chrome.CaptionHeight = CaptionHeight + inset.Top;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(nint hwnd);
-
-    [DllImport("user32.dll")]
-    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+    private void FitMaximized() => WindowFrame.FitMaximized(this, Root);
 }

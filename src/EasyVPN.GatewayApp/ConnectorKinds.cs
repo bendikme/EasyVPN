@@ -72,8 +72,8 @@ public static class ConnectorKinds
             [
                 new("lock", "Lock", "Its name exactly as Tosi Client lists it, such as Tosibox 15 [Matbørsen].", Required: true),
                 new("program", "Tosi Client's program", "TosiboxKey.exe, which starts the client. Set once for every Tosibox facility in Settings; one here is for this facility alone.",
-                    FieldKind.Program, Filter: "Programs (*.exe)|*.exe", Shared: true,
-                    SharedHint: "TosiboxKey.exe, which starts Tosi Client when it is not running. Empty: EasyVPN looks for it among the installed programs."),
+                    FieldKind.Program, Filter: "Programs and shortcuts (*.exe;*.lnk)|*.exe;*.lnk", Shared: true,
+                    SharedHint: "TosiboxKey.exe, which starts Tosi Client when it is not running, in its own folder. Or its Start menu shortcut, to start it just as that does. Empty: EasyVPN looks for it among the installed programs."),
             ]) { SharesPassword = true },
         new("sophos", "Sophos Connect",
             "Sophos Connect, through its command line sccli: for IPsec (.scx) and provisioning (.pro) files, which only it takes.",

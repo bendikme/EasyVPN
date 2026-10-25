@@ -22,7 +22,21 @@ public sealed class GostProcess(string configPath, Action<string> log, Action? l
 
     public bool IsRunning
     {
-        get { lock (_sync) return _process is { HasExited: false }; }
+        get
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    return _process is { HasExited: false };
+                }
+                catch (InvalidOperationException)
+                {
+                    // Never started, or let go of: not running.
+                    return false;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -136,7 +150,17 @@ public sealed class GostProcess(string configPath, Action<string> log, Action? l
             {
                 if (exited != _process || _config is null) return;
                 exited.Dispose();
-                Launch();
+                // Let go of it first: one that cannot be started again leaves nothing half there, and
+                // the next Start with the same configuration tries again.
+                _process = null;
+                try
+                {
+                    Launch();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+                {
+                    log($"gost could not be started again: {ex.Message}");
+                }
             }
         });
     }
