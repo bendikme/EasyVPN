@@ -91,7 +91,7 @@ public static partial class TosiClient
                 say($"Tosi Client showed no list of Locks within {ListFills.TotalSeconds:0} s.{Saved(window)}");
                 return 1;
             }
-            var row = Locate(handle, window, name, ref search);
+            var row = Locate(handle, window, name, ref search, say);
             if (row is null)
             {
                 say($"Tosi Client lists no Lock called '{name}', or it could not be found in its list.{Saved(window)}");
@@ -99,6 +99,7 @@ public static partial class TosiClient
             }
 
             var state = Read(Look(window), row);
+            say($"Tosi Client shows {name}: {state.Status}{(state.Button is { } shown ? $", with its {shown.Name} button" : ", with no button UI Automation sees")}.");
             if (state.Connected == connect && !state.Connecting)
             {
                 say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
@@ -114,10 +115,24 @@ public static partial class TosiClient
             else
             {
                 // Disconnecting one still connecting is cancelling it, with whatever its button is then.
+                var before = state;
                 Press(Look(window), row, state);
                 say(connect ? $"Pressed Connect for {name} in Tosi Client."
                     : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
                     : $"Pressed Disconnect for {name} in Tosi Client.");
+
+                // A client may take UI Automation's press and do nothing: when the row has not
+                // changed in a few seconds, the button is clicked as a person would.
+                if (!WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(4)))
+                {
+                    Front(handle);
+                    var seen = Look(window);
+                    if (Row(seen, name) is { } line && Read(seen, line) is var current && Target(seen, line, current) is { } at)
+                    {
+                        Click(at);
+                        say($"Tosi Client did not take the press, so the button was clicked with the mouse.");
+                    }
+                }
             }
 
             // Done when the client says so: its button turns, its status follows. Its list changes
@@ -132,7 +147,7 @@ public static partial class TosiClient
                     // Out of view again (someone scrolled, the list was redrawn): found again.
                     if (Row(seen, name) is not { } now)
                     {
-                        if (Locate(handle, window, name, ref search) is null) continue;
+                        if (Locate(handle, window, name, ref search, null) is null) continue;
                         seen = Look(window);
                         if (Row(seen, name) is not { } again) continue;
                         now = again;
@@ -346,7 +361,8 @@ public static partial class TosiClient
     // ---------------------------------------------------------------- what the window shows
 
     /// <summary>One element of the window as it was when looked at.</summary>
-    private sealed record Seen(AutomationElement Element, string Name, ControlType Type, Rect Rect, bool Offscreen, bool Enabled, string Help)
+    private sealed record Seen(AutomationElement Element, string Name, ControlType Type, Rect Rect, bool Offscreen, bool Enabled, string Help,
+        bool ReadOnly = false, string Value = "")
     {
         public bool Visible => !Offscreen && !Rect.IsEmpty;
     }
@@ -359,7 +375,8 @@ public static partial class TosiClient
     {
         var cache = new CacheRequest { AutomationElementMode = AutomationElementMode.Full };
         foreach (var property in new[] { AutomationElement.NameProperty, AutomationElement.ControlTypeProperty, AutomationElement.BoundingRectangleProperty,
-                     AutomationElement.IsOffscreenProperty, AutomationElement.IsEnabledProperty, AutomationElement.HelpTextProperty })
+                     AutomationElement.IsOffscreenProperty, AutomationElement.IsEnabledProperty, AutomationElement.HelpTextProperty,
+                     ValuePattern.IsReadOnlyProperty, ValuePattern.ValueProperty })
             cache.Add(property);
         AutomationElementCollection all;
         using (cache.Activate())
@@ -370,7 +387,10 @@ public static partial class TosiClient
             try
             {
                 var c = e.Cached;
-                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, c.BoundingRectangle, c.IsOffscreen, c.IsEnabled, c.HelpText ?? ""));
+                // A box's value and whether it takes typing, where it says.
+                var readOnly = e.GetCachedPropertyValue(ValuePattern.IsReadOnlyProperty, true) is true;
+                var value = e.GetCachedPropertyValue(ValuePattern.ValueProperty, true) as string ?? "";
+                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, c.BoundingRectangle, c.IsOffscreen, c.IsEnabled, c.HelpText ?? "", readOnly, value));
             }
             catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException)
             {
@@ -395,7 +415,8 @@ public static partial class TosiClient
     /// or else where it is, scrolled to where it is listed out of view, or typed into the list
     /// itself, which goes to the row whose name starts so.
     /// </summary>
-    private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search)
+    /// <param name="say">Told how it was found, or why the search could not be used; null to say nothing.</param>
+    private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search, Action<string>? say)
     {
         var seen = Look(window);
         // Searched for already, and still there.
@@ -408,22 +429,38 @@ public static partial class TosiClient
             string[] terms = brackets.Success ? [name, brackets.Groups[2].Value, brackets.Groups[1].Value] : [name];
             foreach (var term in terms.Distinct())
             {
-                if (Enter(handle, box.Element, term) is null) break;
+                var entered = Enter(handle, box.Element, term);
+                if (entered is null)
+                {
+                    say?.Invoke($"Tosi Client's search box (\"{box.Name}\" at {box.Rect.Left:0},{box.Rect.Top:0}) could not be typed into or filled. Boxes seen: {Boxes(seen)}.");
+                    break;
+                }
                 search = box.Element;
                 Seen? found = null;
-                if (WaitUntil(() => (found = Row(Look(window), name)) is not null, TimeSpan.FromSeconds(3))) return found;
+                if (WaitUntil(() => (found = Row(Look(window), name)) is not null, TimeSpan.FromSeconds(3)))
+                {
+                    say?.Invoke($"Searched Tosi Client for \"{term}\"{(entered == true ? "" : " (put in its box, not typed)")}.");
+                    return found;
+                }
+                say?.Invoke($"Searching Tosi Client for \"{term}\"{(entered == true ? "" : " (put in its box, not typed)")} showed no row named {name}. The box now holds \"{ValueOf(box.Element)}\".");
             }
             if (search is not null) Enter(handle, box.Element, "");
             search = null;
             seen = Look(window);
         }
+        else
+            say?.Invoke($"Tosi Client shows no search box UI Automation can type into, among {seen.Count} elements. Boxes seen: {Boxes(seen)}.");
 
         if (Row(seen, name) is { } here) return here;
 
         foreach (var listed in seen.Where(s => s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
         {
             if (!ScrollTo(listed.Element)) continue;
-            if (Row(Look(window), name) is { } scrolled) return scrolled;
+            if (Row(Look(window), name) is { } scrolled)
+            {
+                say?.Invoke($"Scrolled to {name} in Tosi Client's list.");
+                return scrolled;
+            }
         }
 
         // Typed into the list: a click on a row of it, then the name.
@@ -468,8 +505,10 @@ public static partial class TosiClient
 
     /// <summary>
     /// What the client shows on the row: its button, if it is one UI Automation sees, and its status.
-    /// A button out of view does not count - the client may keep the one it replaced - and of a
-    /// Connect and a Disconnect both shown, Disconnect does; of a Cancel, that it is still connecting.
+    /// Every sign counts, as a client may show them in ways UI Automation sees differently: a
+    /// Disconnect anywhere on the row (a button, its label, a cell), or a status of Connected, is
+    /// connected; a Cancel, or a status of Connecting, is connecting. A button out of view does not
+    /// count - the client may keep the one it replaced.
     /// </summary>
     private static State Read(List<Seen> seen, Seen row)
     {
@@ -478,22 +517,45 @@ public static partial class TosiClient
         var bottom = row.Rect.Top + Math.Min(row.Rect.Height, 48);
         bool OnLine(Seen s) => s.Visible && s.Rect.Top + s.Rect.Height / 2 >= top && s.Rect.Top + s.Rect.Height / 2 <= bottom;
 
-        var buttons = seen.Where(s => s.Type == ControlType.Button && OnLine(s) && ConnectButton().IsMatch(s.Name.Trim())).ToList();
+        var line = seen.Where(OnLine).ToList();
+        var labels = line.Select(s => s.Name.Trim()).Where(text => text.Length > 0).ToList();
+        bool Shows(string word) => labels.Any(l => string.Equals(l, word, StringComparison.OrdinalIgnoreCase));
+
+        var buttons = line.Where(s => s.Type == ControlType.Button && ConnectButton().IsMatch(s.Name.Trim())).ToList();
         var button = buttons.FirstOrDefault(b => b.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase))
             ?? buttons.FirstOrDefault(b => b.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
             ?? buttons.FirstOrDefault();
-        var status = string.Join(" ", seen
-            .Where(s => s.Type != ControlType.Button && s.Type != ControlType.Edit && OnLine(s))
+        var status = string.Join(" ", line
+            .Where(s => s.Type != ControlType.Button && s.Type != ControlType.Edit)
             .Select(s => s.Name.Trim())
             // Not the Lock's own name, nor a button's label inside the button.
             .Where(text => text.Length > 0 && !string.Equals(text, row.Name.Trim(), StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
             .Distinct());
 
-        var connecting = button?.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase) == true || ConnectingNow().IsMatch(status);
-        var connected = !connecting && (button is not null
-            ? button.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase)
-            : Connected().IsMatch(status) && !NotConnected().IsMatch(status));
-        return new State(connected, connecting, button, status);
+        var connecting = Shows("Cancel") || ConnectingNow().IsMatch(status);
+        var connected = !connecting && (Shows("Disconnect") || (Connected().IsMatch(status) && !NotConnected().IsMatch(status)));
+        return new State(connected, connecting, button, status.Length > 0 ? status : "(no status shown)");
+    }
+
+    /// <summary>The Lock's row as it is now, where it can be seen; null where it cannot.</summary>
+    private static State? Now(AutomationElement window, string name)
+    {
+        var seen = Look(window);
+        return Row(seen, name) is { } row ? Read(seen, row) : null;
+    }
+
+    private static bool Changed(State before, State now) =>
+        now.Connected != before.Connected || now.Connecting != before.Connecting
+        || now.Status != before.Status || now.Button?.Name != before.Button?.Name;
+
+    /// <summary>Where a person would click on the row: its button, or where the Connection column crosses it.</summary>
+    private static Point? Target(List<Seen> seen, Seen row, State state)
+    {
+        var middle = row.Rect.Top + Math.Min(row.Rect.Height, 48) / 2;
+        if (state.Button is { } button) return new Point(button.Rect.Left + button.Rect.Width / 2, button.Rect.Top + button.Rect.Height / 2);
+        return seen.FirstOrDefault(s => s.Visible && string.Equals(s.Name.Trim(), "Connection", StringComparison.OrdinalIgnoreCase)) is { } column
+            ? new Point(column.Rect.Left + column.Rect.Width / 2, middle)
+            : null;
     }
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
@@ -523,9 +585,18 @@ public static partial class TosiClient
     /// <summary>The search box: one that says so, or else the box shown highest (and furthest right) in the window.</summary>
     private static Seen? SearchBox(List<Seen> seen)
     {
-        var boxes = seen.Where(s => s.Type == ControlType.Edit && s.Visible).ToList();
+        // Only one that takes typing: a client may show read-only text (a status line) as a box too.
+        var boxes = seen.Where(s => s.Type == ControlType.Edit && s.Visible && !s.ReadOnly).ToList();
         return boxes.FirstOrDefault(b => (b.Name + b.Help).Contains("Search", StringComparison.OrdinalIgnoreCase))
-            ?? boxes.OrderBy(b => b.Rect.Top).ThenByDescending(b => b.Rect.Left).FirstOrDefault();
+            ?? boxes.OrderByDescending(b => b.Rect.Left).ThenBy(b => b.Rect.Top).FirstOrDefault();
+    }
+
+    /// <summary>Every box the window shows UI Automation, for working out why the search could not be used.</summary>
+    private static string Boxes(List<Seen> seen)
+    {
+        var boxes = seen.Where(s => s.Type == ControlType.Edit).Select(b =>
+            $"\"{b.Name}\" holding \"{b.Value}\" at {b.Rect.Left:0},{b.Rect.Top:0}{(b.ReadOnly ? ", read-only" : "")}{(b.Visible ? "" : ", hidden")}").ToList();
+        return boxes.Count == 0 ? "none" : string.Join("; ", boxes);
     }
 
     /// <summary>
