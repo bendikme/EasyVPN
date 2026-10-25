@@ -12,8 +12,9 @@
                The facility's "password" is Tosi Client's own, entered when the client asks for it.
 
     Someone must be signed in to the gateway's desktop: set the gateway to sign in by itself. The
-    client is looked for in every signed-in session, and started in the console's when it runs in
-    none. Should a Lock not connect, run this on the gateway's desktop and look at what the app sees:
+    client is looked for, and started, only where someone is at the desktop (unlocked first); a
+    copy left on another desktop is closed first. Should a Lock not connect, run this on the
+    gateway's desktop and look at what the app sees:
         "C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt
     Check: the gateway app there, and a Lock set. It does not touch the client.
 #>
@@ -44,9 +45,11 @@ if ($Action -eq 'Disconnect') {
     exit $LASTEXITCODE
 }
 
-& $gateway desktop --tosibox connect $env:EASYVPN_LOCK
+# Only where someone is at the desktop, unlocked first: the client is typed into.
+& $gateway desktop --usable-only --tosibox connect $env:EASYVPN_LOCK
 if ($LASTEXITCODE -eq $notHere) {
-    # Not running anywhere, or hidden away: start it, in the console's session first.
-    & $gateway desktop --tosibox connect $env:EASYVPN_LOCK --start
+    # Not running there, or hidden away: start it there - closing a copy left on a desktop nobody
+    # is at, which would keep it from starting.
+    & $gateway desktop --usable-only --close-elsewhere tosi --tosibox connect $env:EASYVPN_LOCK --start
 }
 exit $LASTEXITCODE

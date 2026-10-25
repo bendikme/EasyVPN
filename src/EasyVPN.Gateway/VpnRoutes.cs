@@ -10,8 +10,8 @@ namespace EasyVPN.Gateway;
 /// <summary>
 /// The networks a facility's VPN sets up on this machine, for a facility with no routes of its own:
 /// most VPN servers push their networks when the client connects, rather than writing them into the
-/// profile. They are the IPv4 routes that appear while connecting on interfaces that carried no
-/// routes before - the VPN's own adapter - leaving out what Windows gives every interface (its own
+/// profile. They are the IPv4 routes that appear while connecting, other than on the adapters the
+/// gateway's own default route uses, leaving out what Windows gives every interface (its own
 /// address, broadcasts, multicast) and anything wider than /8, such as a route for all traffic.
 /// </summary>
 public static class VpnRoutes
@@ -60,8 +60,11 @@ public static class VpnRoutes
     public static List<string> Added(IReadOnlyList<Route> before, IReadOnlyList<Route> after)
     {
         var known = before.ToHashSet();
-        var routedBefore = before.Select(r => r.Interface).ToHashSet();
-        var added = after.Where(r => !known.Contains(r) && !routedBefore.Contains(r.Interface)).ToList();
+        // Not on the adapters the gateway's own way out runs on: a route a VPN client puts there is
+        // its way to its server, not into the facility. Its own adapter may well be up already - a
+        // Tosi Client is online before a Lock is connected - so it is not left out for that.
+        var uplinks = before.Where(r => r.PrefixLength == 0).Select(r => r.Interface).ToHashSet();
+        var added = after.Where(r => !known.Contains(r) && !uplinks.Contains(r.Interface)).ToList();
         var own = NetworkInterface.GetAllNetworkInterfaces()
             .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
             .Select(a => a.Address)

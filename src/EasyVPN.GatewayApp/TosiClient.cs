@@ -34,6 +34,7 @@ public static partial class TosiClient
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(20);
     // A Lock can take a while; the gateway gives the whole connector longer than this.
     private static readonly TimeSpan Connecting = TimeSpan.FromSeconds(150);
+    private static readonly TimeSpan ListFills = TimeSpan.FromSeconds(45);
 
     public static string DumpPath { get; } = Path.Combine(Path.GetDirectoryName(CrashLog.Path)!, "tosi-client.txt");
 
@@ -84,6 +85,12 @@ public static partial class TosiClient
         var search = (AutomationElement?)null;
         try
         {
+            // Just signed in, the client takes a while to fill its list.
+            if (!WaitUntil(() => Look(window).Any(Listed), ListFills))
+            {
+                say($"Tosi Client showed no list of Locks within {ListFills.TotalSeconds:0} s.{Saved(window)}");
+                return 1;
+            }
             var row = Locate(handle, window, name, ref search);
             if (row is null)
             {
@@ -122,7 +129,14 @@ public static partial class TosiClient
                 try
                 {
                     var seen = Look(window);
-                    if (Row(seen, name) is not { } now) continue;
+                    // Out of view again (someone scrolled, the list was redrawn): found again.
+                    if (Row(seen, name) is not { } now)
+                    {
+                        if (Locate(handle, window, name, ref search) is null) continue;
+                        seen = Look(window);
+                        if (Row(seen, name) is not { } again) continue;
+                        now = again;
+                    }
                     state = Read(seen, now);
                     if (state.Connected == connect && !state.Connecting)
                     {
@@ -366,26 +380,28 @@ public static partial class TosiClient
         return seen;
     }
 
+    /// <summary>Part of the list of Locks, shown: a row of it, or a Connect button.</summary>
+    private static bool Listed(Seen s) =>
+        s.Visible && (s.Type == ControlType.TreeItem || s.Type == ControlType.DataItem || s.Type == ControlType.ListItem
+            || (s.Type == ControlType.Button && ConnectButton().IsMatch(s.Name.Trim())));
+
     /// <summary>The Lock's row, where it can be seen.</summary>
     private static Seen? Row(List<Seen> seen, string name) =>
         seen.FirstOrDefault(s => s.Visible && s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// The Lock's row, brought into view: where it is, scrolled to where it is listed out of view,
-    /// found with the client's search (its whole name, then the part in brackets, then the part
-    /// before), or typed into the list itself, which goes to the row whose name starts so.
+    /// The Lock's row, brought into view: found with the client's search (its whole name, then the
+    /// part in brackets, then the part before), which keeps it in view whoever scrolls the list;
+    /// or else where it is, scrolled to where it is listed out of view, or typed into the list
+    /// itself, which goes to the row whose name starts so.
     /// </summary>
     private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search)
     {
         var seen = Look(window);
-        if (Row(seen, name) is { } here) return here;
+        // Searched for already, and still there.
+        if (search is not null && Row(seen, name) is { } kept) return kept;
 
-        foreach (var listed in seen.Where(s => s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
-        {
-            if (!ScrollTo(listed.Element)) continue;
-            if (Row(Look(window), name) is { } scrolled) return scrolled;
-        }
-
+        // The client's search first: a list filtered to the Lock stays put, whoever scrolls it.
         if (SearchBox(seen) is { } box)
         {
             var brackets = Regex.Match(name, @"^(.*?)\s*\[(.+)\]\s*$");
@@ -400,6 +416,14 @@ public static partial class TosiClient
             if (search is not null) Enter(handle, box.Element, "");
             search = null;
             seen = Look(window);
+        }
+
+        if (Row(seen, name) is { } here) return here;
+
+        foreach (var listed in seen.Where(s => s.Type != ControlType.Edit && string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!ScrollTo(listed.Element)) continue;
+            if (Row(Look(window), name) is { } scrolled) return scrolled;
         }
 
         // Typed into the list: a click on a row of it, then the name.

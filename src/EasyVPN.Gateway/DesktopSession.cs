@@ -22,6 +22,14 @@ public static class DesktopSession
 
     private const int PrivilegeNotHeld = 1314;
 
+    /// <param name="args">
+    /// The app's arguments, after any of these:
+    /// <c>--usable-only</c>, only the sessions someone is connected to (at the console, or over
+    /// Remote Desktop), as nothing can be typed into the others;
+    /// <c>--close-elsewhere PREFIX</c>, programs whose names start so are closed in every other
+    /// session before the app runs: a VPN client left on a desktop nobody uses, which would keep
+    /// another copy from starting.
+    /// </param>
     public static int RunApp(string[] args, TimeSpan timeout)
     {
         var app = Path.Combine(AppContext.BaseDirectory, "EasyVPN.GatewayApp.exe");
@@ -31,9 +39,26 @@ public static class DesktopSession
             return 1;
         }
 
-        var tried = false;
-        foreach (var (session, active) in Sessions())
+        var usableOnly = false;
+        string? closeElsewhere = null;
+        var rest = new List<string>(args);
+        while (rest.Count > 0)
         {
+            if (rest[0] == "--usable-only") usableOnly = true;
+            else if (rest[0] == "--close-elsewhere" && rest.Count > 1)
+            {
+                closeElsewhere = rest[1];
+                rest.RemoveAt(0);
+            }
+            else break;
+            rest.RemoveAt(0);
+        }
+        args = [.. rest];
+
+        var tried = false;
+        foreach (var (session, active, locked) in Sessions())
+        {
+            if (usableOnly && !active) continue;
             if (!WTSQueryUserToken(session, out var token))
             {
                 // Only SYSTEM may do this; run by hand, the app runs here, in this session.
@@ -41,8 +66,9 @@ public static class DesktopSession
                 continue; // Nobody signed in there.
             }
             tried = true;
+            if (closeElsewhere is not null) CloseElsewhere(closeElsewhere, session);
             // Whose desktop, so what follows can be told apart in the gateway's activity.
-            Console.WriteLine($"On {Describe(session)}'s desktop (session {session}, {(active ? Station(session) : "disconnected")}):");
+            Console.WriteLine($"On {Describe(session)}'s desktop (session {session}, {(active ? Station(session) + (locked ? ", locked" : "") : "disconnected")}):");
             int code;
             using (var user = new SafeAccessTokenHandle(token))
             using (var full = Elevated(user))
@@ -51,8 +77,32 @@ public static class DesktopSession
         }
 
         if (tried) return NotHere;
-        Console.WriteLine("Nobody is signed in to this gateway's desktop. Set the gateway to sign in by itself, or sign in there.");
+        Console.WriteLine(usableOnly
+            ? "Nobody is at a desktop of this gateway (signed in and connected, at the console or over Remote Desktop). Set the gateway to sign in by itself."
+            : "Nobody is signed in to this gateway's desktop. Set the gateway to sign in by itself, or sign in there.");
         return 1;
+    }
+
+    /// <summary>Closes the programs whose names start with <paramref name="prefix"/> in every session but <paramref name="keep"/>.</summary>
+    private static void CloseElsewhere(string prefix, uint keep)
+    {
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId == 0 || process.SessionId == keep || !process.ProcessName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    var session = (uint)process.SessionId;
+                    process.Kill();
+                    Console.WriteLine($"Closed {process.ProcessName} on {Describe(session)}'s desktop (session {session}), where nobody could use it.");
+                }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+                {
+                    // Gone already, or not to be closed.
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -74,9 +124,9 @@ public static class DesktopSession
     /// Desktop's - and those left disconnected last: a client started there would be out of
     /// everyone's sight, and could not be typed into.
     /// </summary>
-    private static List<(uint Session, bool Active)> Sessions()
+    private static List<(uint Session, bool Active, bool Locked)> Sessions()
     {
-        var sessions = new List<(uint Session, bool Active)>();
+        var sessions = new List<(uint Session, bool Active, bool Locked)>();
         if (WTSEnumerateSessions(IntPtr.Zero, 0, 1, out var list, out var count))
         {
             try
@@ -85,7 +135,8 @@ public static class DesktopSession
                 for (var i = 0; i < count; i++)
                 {
                     var info = Marshal.PtrToStructure<WtsSessionInfo>(list + i * size);
-                    if (info.SessionId != 0 && info.State is WtsActive or WtsDisconnected) sessions.Add((info.SessionId, info.State == WtsActive));
+                    if (info.SessionId != 0 && info.State is WtsActive or WtsDisconnected)
+                        sessions.Add((info.SessionId, info.State == WtsActive, Locked(info.SessionId)));
                 }
             }
             finally
@@ -93,8 +144,26 @@ public static class DesktopSession
                 WTSFreeMemory(list);
             }
         }
+        // Unlocked before locked: only a desktop someone could work at takes typing.
         var console = WTSGetActiveConsoleSessionId();
-        return [.. sessions.OrderByDescending(s => s.Active).ThenByDescending(s => s.Session == console)];
+        return [.. sessions.OrderByDescending(s => s.Active).ThenBy(s => s.Locked).ThenByDescending(s => s.Session == console)];
+    }
+
+    /// <summary>Whether a session's screen is locked, so nothing can be typed into it.</summary>
+    private static bool Locked(uint session)
+    {
+        const int sessionInfoEx = 25, flagsOffset = 16, lockedFlag = 0;
+        if (!WTSQuerySessionInformation(IntPtr.Zero, session, sessionInfoEx, out var buffer, out _)) return false;
+        try
+        {
+            // WTSINFOEXW: its level, then (aligned to 8, as it holds 64-bit times) WTSINFOEX_LEVEL1_W:
+            // session id, state, flags.
+            return Marshal.ReadInt32(buffer, flagsOffset) == lockedFlag;
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
     }
 
     /// <summary>The user signed in to a session, as DOMAIN\name.</summary>

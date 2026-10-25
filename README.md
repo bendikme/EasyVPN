@@ -251,16 +251,19 @@ customer. Each script's header says what its settings mean. Each returns once it
 connected (OpenVPN's "Initialization Sequence Completed", Cisco's "state: Connected", Tosi Client's
 Disconnect button), so a facility needs no `check` to turn green.
 
-**Tosibox.** Someone must be signed in to the gateway's desktop: set the gateway to sign in by
-itself. The gateway looks for Tosi Client in every signed-in session, with the app run there with
-that user's full rights (so a client running as administrator can be reached too); when it is in
-none, or only in the notification area, the app starts it in the console's session - with the
-program set in *Settings* (`TosiboxKey.exe`), or else one it finds where Windows keeps track of
-programs - and types its password (from *Settings*, or the facility's own). It finds the Lock in
-the list (scrolled to, searched for, or typed into the list), presses Connect or Disconnect, and
-waits until the client shows it. The app drives the client through UI Automation where it allows,
-and otherwise with the mouse and keyboard, as a person would: typing needs that session's screen on
-and unlocked (not a disconnected Remote Desktop session). Give each facility the Lock's name exactly
+**Tosibox.** Someone must be at the gateway's desktop: set the gateway to sign in by itself. The
+gateway looks for Tosi Client only in the sessions someone is connected to, unlocked ones first
+(at the console, or over Remote Desktop), with the app run there with that user's full rights (so
+a client running as administrator can be reached too). When it is in none of them, or only in the
+notification area, the app starts it there - with the program set in *Settings*
+(`TosiboxKey.exe`), or else one it finds where Windows keeps track of programs - after closing any
+copy of it left on another desktop, where nobody could use it and it would keep another from
+starting; then it types its password (from *Settings*, or the facility's own) and waits for the
+list to fill. It finds the Lock with the client's search, which filters the list to it and so
+keeps it in view whoever scrolls (or else scrolled to, or typed into the list), presses Connect or
+Disconnect (Cancel, for one still connecting), and waits until the client shows it. The app drives
+the client through UI Automation where it allows, and otherwise with the mouse and keyboard, as a
+person would: typing needs that session's screen on and unlocked. Give each facility the Lock's name exactly
 as the client lists it, such as `Tosibox 15 [Matbørsen]`, and leave `routes` empty unless the Lock
 is in Layer 2 mode. When it cannot find the Lock or read its state, the app saves what it saw of
 the client to `%LOCALAPPDATA%\EasyVPN\tosi-client.txt` and says so; `"C:\Program Files\EasyVPN
