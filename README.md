@@ -146,6 +146,9 @@ added to `data-ciphers`; `comp-lzo` gets `allow-compression asym`), and old cert
 facility with a mistake in red, and the gateway uses what is saved straight away. The facilities
 are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which *Open facilities.json* in the
 editor opens in Notepad; *Encrypt a password* in the app makes a `password` for writing it by hand.
+*Import…* adds the facilities in another file in the same form - another gateway's, or one made from
+Tosibox Monitor's list of Locks - leaving out those already there (the same id, or for Tosibox the
+same Lock), so importing a newer list adds only what is new; *Save* keeps them.
 
 *Settings…*, at the top of the app, opens (as administrator) what the facilities of a kind share,
 set once rather than in each: for Tosibox, Tosi Client's program (`TosiboxKey.exe`) and its

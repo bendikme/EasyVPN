@@ -16,6 +16,7 @@
     <PathGeometry x:Key="GeoStar"
                   Figures="M12,3.4 L14.6,9.2 L20.9,9.9 L16.2,14.1 L17.5,20.3 L12,17.1 L6.5,20.3 L7.8,14.1 L3.1,9.9 L9.4,9.2 Z" />
     <PathGeometry x:Key="GeoEdit" Figures="M4.5,19.5 L4.5,16 L15.5,5 L19,8.5 L8,19.5 Z M13.5,7 L17,10.5" />
+    <PathGeometry x:Key="GeoImport" Figures="M12,4 L12,15 M7.5,10.5 L12,15 L16.5,10.5 M4.5,15.5 L4.5,19.5 L19.5,19.5 L19.5,15.5" />
     <!-- The brand mark, drawn the same in Assets\easyvpn.ico: a shield with a keyhole. -->
     <PathGeometry x:Key="GeoShield" Figures="M12,2.6 L19.4,5.5 L19.4,11.2 C19.4,15.9 16.3,19.5 12,21.2 C7.7,19.5 4.6,15.9 4.6,11.2 L4.6,5.5 Z" />
     <PathGeometry x:Key="GeoKeyhole" Figures="M10,10.2 A2,2 0 1 1 14,10.2 A2,2 0 0 1 12.9,12 L13.3,15.8 L10.7,15.8 L11.1,12 A2,2 0 0 1 10,10.2 Z" />

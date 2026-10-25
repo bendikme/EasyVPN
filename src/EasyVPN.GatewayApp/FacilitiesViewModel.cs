@@ -58,6 +58,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         SaveCommand = new RelayCommand(() => Save(), () => _canEdit);
         BrowseCommand = new RelayCommand(p => Browse((SettingRow)p!));
         OpenFileCommand = new RelayCommand(() => Process.Start("notepad.exe", $"\"{_path}\"")?.Dispose());
+        ImportCommand = new RelayCommand(Import, () => _canEdit);
 
         Load(select);
     }
@@ -75,6 +76,7 @@ public sealed class FacilitiesViewModel : ObservableObject
     public RelayCommand SaveCommand { get; }
     public RelayCommand BrowseCommand { get; }
     public RelayCommand OpenFileCommand { get; }
+    public RelayCommand ImportCommand { get; }
 
     public string FilePath => _path;
 
@@ -150,7 +152,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         Validate();
         Selected = Facilities.FirstOrDefault(f => string.Equals(f.Id, select, StringComparison.OrdinalIgnoreCase))
             ?? View.Cast<FacilityDraft>().FirstOrDefault();
-        foreach (var command in new[] { AddCommand, DuplicateCommand, RemoveCommand, SaveCommand }) command.RaiseCanExecuteChanged();
+        foreach (var command in new[] { AddCommand, DuplicateCommand, RemoveCommand, SaveCommand, ImportCommand }) command.RaiseCanExecuteChanged();
         Raise(nameof(CountText));
     }
 
@@ -259,6 +261,58 @@ public sealed class FacilitiesViewModel : ObservableObject
         Raise(nameof(CountText));
     }
 
+    /// <summary>
+    /// The facilities in another file, in facilities.json's form - from another gateway, or made from
+    /// Tosibox Monitor's list of Locks - added to these. One already here (the same id, or for
+    /// Tosibox the same Lock) is left as it is, so importing a newer list again adds only what is
+    /// new. Nothing is written until Save.
+    /// </summary>
+    private void Import()
+    {
+        var dialog = new OpenFileDialog { Filter = "Facilities (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true };
+        if (dialog.ShowDialog() != true) return;
+        var name = Path.GetFileName(dialog.FileName);
+        List<Facility> imported;
+        try
+        {
+            imported = JsonSerializer.Deserialize<FacilityFile>(File.ReadAllText(dialog.FileName), Defaults.Json)?.Facilities ?? [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Error = $"{name} could not be read: {ex.Message}";
+            return;
+        }
+
+        var added = new List<FacilityDraft>();
+        foreach (var facility in imported)
+        {
+            if (Facilities.Any(f => SameAs(f, facility))) continue;
+            var draft = new FacilityDraft(facility, KindOf(facility.Connector)) { AutoId = string.IsNullOrWhiteSpace(facility.Id) };
+            Track(draft);
+            added.Add(draft);
+        }
+        Filter = "";
+        if (added.Count > 0) Selected = added.OrderBy(d => d.Customer).ThenBy(d => d.Title).First();
+        Error = null;
+        var kept = imported.Count - added.Count;
+        Status = (added.Count, kept) switch
+        {
+            (0, 0) => $"{name} has no facilities.",
+            (0, _) => $"Every facility in {name} is here already.",
+            _ => $"{Count(added.Count)} added from {name}{(kept > 0 ? $"; {Count(kept)} already here left as they are" : "")}. Save to keep them.",
+        };
+
+        static string Count(int n) => n == 1 ? "1 facility" : $"{n} facilities";
+    }
+
+    /// <summary>The same facility: the same id, or a Tosibox one for the same Lock.</summary>
+    private static bool SameAs(FacilityDraft draft, Facility facility) =>
+        (facility.Id.Trim().Length > 0 && string.Equals(draft.Id.Trim(), facility.Id.Trim(), StringComparison.OrdinalIgnoreCase))
+        || (string.Equals(draft.Kind.Name, "tosibox", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(facility.Connector, "tosibox", StringComparison.OrdinalIgnoreCase)
+            && facility.Settings.GetValueOrDefault("lock") is { Length: > 0 } lockName
+            && string.Equals(draft.GetSetting("lock").Trim(), lockName.Trim(), StringComparison.OrdinalIgnoreCase));
+
     private void Track(FacilityDraft draft)
     {
         Facilities.Add(draft);
@@ -283,6 +337,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         _filter.Length == 0
         || draft.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
         || draft.Customer.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        || draft.Group.Contains(_filter, StringComparison.OrdinalIgnoreCase)
         || draft.Id.Contains(_filter, StringComparison.OrdinalIgnoreCase);
 
     private ConnectorKind KindOf(string name)
