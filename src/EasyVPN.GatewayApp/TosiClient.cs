@@ -115,15 +115,28 @@ public static partial class TosiClient
             else
             {
                 // Disconnecting one still connecting is cancelling it, with whatever its button is then.
+                // A blank status is taken for a connection only when it stays so: the client draws a
+                // connected Lock's status itself, but the list may also be caught mid-redraw.
+                if (!connect && state.Connected && state.Why == Blank)
+                {
+                    Thread.Sleep(1000);
+                    if (Now(window, name) is { Connected: false } recheck)
+                    {
+                        say($"{name} is not connected in Tosi Client.");
+                        return 0;
+                    }
+                }
+
                 var before = state;
-                Press(Look(window), row, state);
-                say(connect ? $"Pressed Connect for {name} in Tosi Client."
+                var clicked = Press(Look(window), row, state);
+                say(connect ? $"Pressed Connect for {name} in Tosi Client{(clicked ? ", with the mouse, as it shows no button UI Automation sees" : "")}."
                     : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
-                    : $"Pressed Disconnect for {name} in Tosi Client.");
+                    : $"Pressed Disconnect for {name} in Tosi Client ({state.Why}).");
 
                 // A client may take UI Automation's press and do nothing: when the row has not
-                // changed in a few seconds, the button is clicked as a person would.
-                if (!WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(4)))
+                // changed in a few seconds, the button is clicked as a person would. Never a second
+                // click, though: that would undo the first.
+                if (!clicked && !WaitUntil(() => Now(window, name) is { } now && Changed(before, now), TimeSpan.FromSeconds(6)))
                 {
                     Front(handle);
                     var seen = Look(window);
@@ -381,16 +394,21 @@ public static partial class TosiClient
         AutomationElementCollection all;
         using (cache.Activate())
             all = window.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
+        // Out of the window is out of view, whatever an element says of itself: a list scrolled past
+        // a row may still call it on screen.
+        var bounds = window.Current.BoundingRectangle;
         var seen = new List<Seen>(all.Count);
         foreach (AutomationElement e in all)
         {
             try
             {
                 var c = e.Cached;
+                var rect = c.BoundingRectangle;
+                var inside = !rect.IsEmpty && bounds.Contains(new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2));
                 // A box's value and whether it takes typing, where it says.
                 var readOnly = e.GetCachedPropertyValue(ValuePattern.IsReadOnlyProperty, true) is true;
                 var value = e.GetCachedPropertyValue(ValuePattern.ValueProperty, true) as string ?? "";
-                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, c.BoundingRectangle, c.IsOffscreen, c.IsEnabled, c.HelpText ?? "", readOnly, value));
+                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, rect, c.IsOffscreen || !inside, c.IsEnabled, c.HelpText ?? "", readOnly, value));
             }
             catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException)
             {
@@ -400,10 +418,11 @@ public static partial class TosiClient
         return seen;
     }
 
-    /// <summary>Part of the list of Locks, shown: a row of it, or a Connect button.</summary>
+    /// <summary>Part of the list of Locks, shown: a row of it, a Connect button, or a Lock's status.</summary>
     private static bool Listed(Seen s) =>
         s.Visible && (s.Type == ControlType.TreeItem || s.Type == ControlType.DataItem || s.Type == ControlType.ListItem
-            || (s.Type == ControlType.Button && ConnectButton().IsMatch(s.Name.Trim())));
+            || (s.Type == ControlType.Button && ConnectButton().IsMatch(s.Name.Trim()))
+            || NotConnected().IsMatch(s.Name));
 
     /// <summary>The Lock's row, where it can be seen.</summary>
     private static Seen? Row(List<Seen> seen, string name) =>
@@ -501,7 +520,10 @@ public static partial class TosiClient
     }
 
     /// <param name="Connecting">Neither yet: the client is still at it, and says so (or offers to cancel).</param>
-    private sealed record State(bool Connected, bool Connecting, Seen? Button, string Status);
+    /// <param name="Why">What told it connected, or not: for the activity log.</param>
+    private sealed record State(bool Connected, bool Connecting, Seen? Button, string Status, string Why = "");
+
+    private const string Blank = "its status shows nothing UI Automation can read, as the client shows a connected Lock's";
 
     /// <summary>
     /// What the client shows on the row: its button, if it is one UI Automation sees, and its status.
@@ -532,9 +554,21 @@ public static partial class TosiClient
             .Where(text => text.Length > 0 && !string.Equals(text, row.Name.Trim(), StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
             .Distinct());
 
+        // The Lock's devices, listed under its row (indented, by address) once it is connected.
+        var devices = seen.Count(s => s.Visible && s.Rect.Left > row.Rect.Left + 4
+            && s.Rect.Top >= bottom - 2 && s.Rect.Top <= bottom + 3 * 48 && Address().IsMatch(s.Name.Trim()));
+
+        // Not connected, for sure: the status says so (ready to connect, no Internet connection …).
+        var idle = NotConnected().IsMatch(status);
         var connecting = Shows("Cancel") || ConnectingNow().IsMatch(status);
-        var connected = !connecting && (Shows("Disconnect") || (Connected().IsMatch(status) && !NotConnected().IsMatch(status)));
-        return new State(connected, connecting, button, status.Length > 0 ? status : "(no status shown)");
+        var why = idle ? $"it says {status}"
+            : Shows("Disconnect") ? "it shows Disconnect"
+            : Connected().IsMatch(status) ? $"it says {status}"
+            : devices > 0 ? "its devices are listed under it"
+            : status.Length == 0 ? Blank
+            : $"it says {status}";
+        var connected = !connecting && !idle && (Shows("Disconnect") || Connected().IsMatch(status) || devices > 0 || status.Length == 0);
+        return new State(connected, connecting, button, status.Length > 0 ? status : "(no status shown)", why);
     }
 
     /// <summary>The Lock's row as it is now, where it can be seen; null where it cannot.</summary>
@@ -559,16 +593,18 @@ public static partial class TosiClient
     }
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
-    private static void Press(List<Seen> seen, Seen row, State state)
+    /// <returns>True when it was a click with the mouse, rather than UI Automation's press.</returns>
+    private static bool Press(List<Seen> seen, Seen row, State state)
     {
-        if (state.Button is { } button)
+        if (state.Button is { } button && button.Element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
-            Press(button.Element);
-            return;
+            ((InvokePattern)invoke).Invoke();
+            return false;
         }
-        var column = seen.FirstOrDefault(s => s.Visible && string.Equals(s.Name.Trim(), "Connection", StringComparison.OrdinalIgnoreCase))
+        var at = Target(seen, row, state)
             ?? throw new InvalidOperationException("Tosi Client shows no Connect button, and no Connection column to find one in.");
-        Click(new Point(column.Rect.Left + column.Rect.Width / 2, row.Rect.Top + Math.Min(row.Rect.Height, 48) / 2));
+        Click(at);
+        return true;
     }
 
     private static void Press(AutomationElement button)
@@ -749,8 +785,12 @@ public static partial class TosiClient
     [GeneratedRegex(@"\bconnected\b", RegexOptions.IgnoreCase)]
     private static partial Regex Connected();
 
-    [GeneratedRegex(@"\b(not|dis)\s*connected\b|ready to connect", RegexOptions.IgnoreCase)]
+    /// <summary>A status that says it is not connected: ready to connect, no Internet connection, offline …</summary>
+    [GeneratedRegex(@"\b(not|dis)\s*connected\b|ready to connect|no internet|offline|unreachable|not available", RegexOptions.IgnoreCase)]
     private static partial Regex NotConnected();
+
+    [GeneratedRegex(@"^\d{1,3}(\.\d{1,3}){3}$")]
+    private static partial Regex Address();
 
     /// <summary>
     /// What there is of Tosi on this desktop when its windows are not as expected: the titles of
