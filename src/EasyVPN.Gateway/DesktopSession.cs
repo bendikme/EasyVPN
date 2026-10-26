@@ -65,13 +65,18 @@ public static class DesktopSession
         var tried = false;
         foreach (var (session, connected, locked) in Sessions())
         {
-            var active = connected || ToConsole(session);
-            if (usableOnly && !active) continue;
             if (!WTSQueryUserToken(session, out var token))
             {
                 // Only SYSTEM may do this; run by hand, the app runs here, in this session.
                 if (Marshal.GetLastWin32Error() == PrivilegeNotHeld) return RunHere(app, args, timeout);
                 continue; // Nobody signed in there.
+            }
+            // Only a desktop someone is signed in to is brought to the console.
+            var active = connected || ToConsole(session);
+            if (usableOnly && !active)
+            {
+                CloseHandle(token);
+                continue;
             }
             tried = true;
             if (closeElsewhere is not null) CloseElsewhere(closeElsewhere, session);

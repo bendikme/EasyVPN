@@ -41,11 +41,14 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
         get => _state;
         set
         {
-            if (SetProperty(ref _state, value)) OnPropertyChanged(nameof(IsActive));
+            if (SetProperty(ref _state, value)) Raise(nameof(IsActive), nameof(IsUp));
         }
     }
 
     public bool IsActive => _state is not null;
+
+    /// <summary>Connecting, connected, or on its way down: nothing to connect. One that failed can be connected again.</summary>
+    public bool IsUp => _state is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted or ConnectionState.Disconnecting;
 
     public bool Matches(string search) =>
         search.Length == 0

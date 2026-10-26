@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace EasyVPN.Gateway;
@@ -35,10 +36,21 @@ public sealed class Connectors(RecentLog log)
         }
 
         var environment = EnvironmentOf(facility);
-        var password = string.IsNullOrEmpty(facility.Password) ? Shared(facility.Connector)?.Password : facility.Password;
-        if (!string.IsNullOrEmpty(password))
-            environment["EASYVPN_PASSWORD"] = Secret.Reveal(password);
+        if (Password(facility) is { } password)
+        {
+            try
+            {
+                environment["EASYVPN_PASSWORD"] = Secret.Reveal(password);
+            }
+            catch (Exception ex) when (ex is CryptographicException or FormatException)
+            {
+                // Not one this gateway can read. Whatever is up is still taken down, without it.
+                if (action == "Connect") throw new InvalidOperationException(Unreadable(facility));
+            }
+        }
 
+        // When it started, so the activity shows how long its VPN client took, and what came before.
+        log.Add($"{facility.Connector}: {action} {facility.Name}");
         return await PowerShell.RunFileAsync(script, [action], environment, Limit, line =>
         {
             log.Add($"{facility.Connector}: {line}");
@@ -55,7 +67,19 @@ public sealed class Connectors(RecentLog log)
         if (!(await File.ReadAllTextAsync(script, ct)).Contains("'Check'", StringComparison.Ordinal))
             return new(facility.Name, CheckLevel.Warning, $"The {facility.Connector} connector has no Check, so this cannot tell whether it is ready.", FacilityId: facility.Id);
 
-        // The password is not needed to check, so it is not decrypted for it.
+        // The password is not handed to the check; it only has to be one this gateway can read.
+        if (Password(facility) is { } password)
+        {
+            try
+            {
+                Secret.Reveal(password);
+            }
+            catch (Exception ex) when (ex is CryptographicException or FormatException)
+            {
+                return new(facility.Name, CheckLevel.Problem, Unreadable(facility), FacilityId: facility.Id);
+            }
+        }
+
         var lines = new List<string>();
         var code = await PowerShell.RunFileAsync(script, ["Check"], EnvironmentOf(facility), CheckLimit, lines.Add, ct);
         var text = string.Join(" ", lines);
@@ -63,6 +87,18 @@ public sealed class Connectors(RecentLog log)
             ? new(facility.Name, CheckLevel.Ok, text.Length > 0 ? text : "Ready", FacilityId: facility.Id)
             : new(facility.Name, CheckLevel.Problem, text.Length > 0 ? text : $"The {facility.Connector} connector's check failed (exit code {code}).", FacilityId: facility.Id);
     }
+
+    /// <summary>The facility's own password, or else the one its connector's facilities share; null for none.</summary>
+    private string? Password(Facility facility) =>
+        string.IsNullOrEmpty(facility.Password) ? Shared(facility.Connector)?.Password is { Length: > 0 } shared ? shared : null : facility.Password;
+
+    /// <summary>
+    /// A password encrypted on another machine - facilities.json or settings.json copied from another
+    /// gateway, say: Windows encrypts it for the machine, and only that machine can decrypt it.
+    /// </summary>
+    private static string Unreadable(Facility facility) => string.IsNullOrEmpty(facility.Password)
+        ? $"The password for {facility.Connector} in the gateway's Settings was encrypted on another machine, so this gateway cannot read it. Type it again in Settings in the EasyVPN Gateway app."
+        : $"{facility.Name}'s password was encrypted on another machine, so this gateway cannot read it. Type it again in the facility editor (Edit facilities in the EasyVPN Gateway app).";
 
     private Dictionary<string, string> EnvironmentOf(Facility facility)
     {

@@ -59,6 +59,8 @@ public sealed class ConnectionController(
     // touched while _busy is held.
     private IReadOnlyList<string>? _vpnRoutes;
 
+    private readonly LearnedRoutes _learned = new();
+
     // Why the hub would not start, said once. Only touched while _busy is held.
     private string? _hubProblem;
 
@@ -122,7 +124,7 @@ public sealed class ConnectionController(
                 if (request != _request) return; // A newer request takes it from here.
             }
 
-            if (!await TearDownAsync(request))
+            if (!await TearDownAsync(request, switching: target is not null))
                 return;
 
             if (target is null)
@@ -137,6 +139,8 @@ public sealed class ConnectionController(
         catch (Exception ex)
         {
             Set(request, ConnectionState.Failed, ex.Message);
+            // Sharing left on for a switch goes with it.
+            await Settled(CloseWayInAsync());
         }
         finally
         {
@@ -155,6 +159,7 @@ public sealed class ConnectionController(
 
         var learn = !facility.Layer2 && facility.Routes.Count == 0;
         var before = learn ? VpnRoutes.Snapshot() : [];
+        IReadOnlyList<string> remembered = learn ? _learned.Of(facility.Id) : [];
 
         _up = facility;
         var code = await connectors.RunAsync(facility, "Connect", ct, line => Progress(request, line));
@@ -188,7 +193,7 @@ public sealed class ConnectionController(
             Set(request, ConnectionState.Connecting, "Waiting for the networks its VPN sets up. Sign in on the gateway if the VPN client asks.");
             try
             {
-                routes = await LearnRoutesAsync(before, deadline, ct, found =>
+                routes = await LearnRoutesAsync(before, remembered, deadline, ct, found =>
                 {
                     if (early is not null || Sharing.Carrying(found) is not { } adapter) return;
                     Set(request, ConnectionState.Connecting, $"Sharing {facility.Name}'s VPN with the workstations");
@@ -204,10 +209,11 @@ public sealed class ConnectionController(
             if (routes.Count == 0)
             {
                 await FailAsync(request,
-                    $"{facility.Name}'s VPN set up no networks on this gateway within {facility.Timeout} s. Give the facility its routes in the facility editor.");
+                    $"{facility.Name}'s VPN set up no networks on this gateway within {facility.Timeout} s. Was it connected already, before EasyVPN connected it? Then disconnect it there and connect again; or give the facility its routes in the facility editor.");
                 return;
             }
             log.Add($"{facility.Name}'s VPN set up {string.Join(", ", routes)}");
+            if (!routes.SequenceEqual(remembered)) _learned.Remember(facility.Id, routes);
         }
 
         lock (_sync)
@@ -232,12 +238,19 @@ public sealed class ConnectionController(
     /// client adds its routes a few seconds after it connects, and not always all at once.
     /// </summary>
     /// <param name="found">Told what there is so far, each time there is some.</param>
-    private static async Task<List<string>> LearnRoutesAsync(IReadOnlyList<VpnRoutes.Route> before, DateTime deadline, CancellationToken ct, Action<List<string>>? found = null)
+    /// <param name="remembered">What it set up the last time it connected (<see cref="LearnedRoutes"/>).</param>
+    private static async Task<List<string>> LearnRoutesAsync(IReadOnlyList<VpnRoutes.Route> before, IReadOnlyList<string> remembered, DateTime deadline, CancellationToken ct, Action<List<string>>? found = null)
     {
         List<string> last = [];
         while (true)
         {
-            var now = VpnRoutes.Added(before, VpnRoutes.Snapshot());
+            var snapshot = VpnRoutes.Snapshot();
+            var now = VpnRoutes.Added(before, snapshot);
+            // What it set up last time, and nothing more: done, without waiting for it to hold still.
+            if (remembered.Count > 0 && now.Count == remembered.Count && remembered.All(now.Contains)) return now;
+            // Up before it was asked - a Lock connected in Tosi Client already - so nothing is new:
+            // what it set up last time is there.
+            if (now.Count == 0 && VpnRoutes.AllPresent(remembered, snapshot)) return [.. remembered];
             if (now.Count > 0) found?.Invoke(now);
             if (now.Count > 0 && now.SequenceEqual(last)) return now;
             if (DateTime.UtcNow >= deadline) return now;
@@ -261,6 +274,12 @@ public sealed class ConnectionController(
     {
         if (facility.Layer2)
         {
+            // Sharing left on from the facility before goes: this one is bridged.
+            if (_sharedAt is not null)
+            {
+                (_sharedAt, _sharedAdapter) = (null, null);
+                await sharing.UnshareAsync();
+            }
             layer2.Open();
             return;
         }
@@ -269,8 +288,6 @@ public sealed class ConnectionController(
         var vpn = Sharing.Carrying(routes)
             ?? throw new InvalidOperationException($"This gateway has no route to {string.Join(", ", routes)} to share with the workstations.");
         _vpnRoutes = routes;
-        // Shared already, while its networks were coming in.
-        if (_sharedAt == hub.Launches && _sharedAdapter == vpn.Id) return;
         await ShareAsync(vpn, ct);
     }
 
@@ -278,9 +295,14 @@ public sealed class ConnectionController(
     private async Task ShareAsync(System.Net.NetworkInformation.NetworkInterface vpn, CancellationToken ct)
     {
         var launch = hub.Launches;
-        // Marked first, so a share that fails halfway is undone all the same, and tried again.
-        (_sharedAt, _sharedAdapter) = (-1, null);
-        await sharing.ShareAsync(vpn, ct);
+        // Shared with it already: while its networks were coming in, or for the facility before, on
+        // the same VPN client's adapter. Sharing takes seconds, so it is not done again.
+        if (_sharedAt != launch || _sharedAdapter != vpn.Id)
+        {
+            // Marked first, so a share that fails halfway is undone all the same, and tried again.
+            (_sharedAt, _sharedAdapter) = (-1, null);
+            await sharing.ShareAsync(vpn, ct);
+        }
         (_sharedAt, _sharedAdapter, _vpn, _fallback) = (launch, vpn.Id, vpn.Id, null);
     }
 
@@ -306,16 +328,32 @@ public sealed class ConnectionController(
     }
 
     /// <summary>Closes the way in and disconnects what is up. False, and Failed, if it still answers.</summary>
-    private async Task<bool> TearDownAsync(int request)
+    /// <param name="switching">
+    /// Another facility follows. Sharing is left on: the next one most often goes through the same
+    /// VPN client's adapter - every Tosibox Lock through Tosi Client's - and turning sharing off and
+    /// on again takes seconds. The workstations route nothing to the gateway meanwhile. It does go
+    /// should this facility not go down, and when the next one ends up on another adapter.
+    /// </param>
+    private async Task<bool> TearDownAsync(int request, bool switching = false)
     {
-        await CloseWayInAsync();
+        // Sharing goes while the VPN client is told to disconnect, not before: should Windows' sharing
+        // hang, the facility still goes down meanwhile.
+        Task closing;
+        if (switching)
+        {
+            layer2.Close();
+            closing = Task.CompletedTask;
+        }
+        else closing = CloseWayInAsync();
         if (_up is not { } facility)
         {
+            await closing;
             (_vpn, _fallback, _vpnRoutes) = (null, null, null);
             return true;
         }
 
         var code = await connectors.RunAsync(facility, "Disconnect", CancellationToken.None, line => Progress(request, line));
+        await closing;
         var deadline = DateTime.UtcNow + CleanupWait;
         if (facility.Check is { } check)
         {
@@ -323,6 +361,7 @@ public sealed class ConnectionController(
             {
                 if (DateTime.UtcNow >= deadline)
                 {
+                    await CloseWayInAsync();
                     Set(request, ConnectionState.Failed,
                         $"{facility.Name} still answers at {check}. Disconnect its VPN client on the gateway, then try again.");
                     return false;
@@ -340,6 +379,7 @@ public sealed class ConnectionController(
             {
                 if (DateTime.UtcNow >= deadline)
                 {
+                    await CloseWayInAsync();
                     Set(request, ConnectionState.Failed,
                         $"{facility.Name} is still connected on the gateway: its VPN still carries {string.Join(", ", routes)}{(code != 0 ? $", and its {facility.Connector} connector failed (exit code {code})" : "")}. Disconnect it in its VPN client on the gateway, or disconnect again here.");
                     return false;

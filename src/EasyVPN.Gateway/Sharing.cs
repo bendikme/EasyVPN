@@ -17,6 +17,12 @@ public sealed class Sharing(RecentLog log)
 {
     private static readonly string Script = Path.Combine(AppContext.BaseDirectory, "sharing.ps1");
 
+    // Sharing takes Windows a few seconds. One that takes far longer has hung - Windows' sharing
+    // service stuck, or Routing and Remote Access holding it - and waiting on is no use: everything
+    // else the gateway is asked waits with it.
+    private static readonly TimeSpan ShareLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan UnshareLimit = TimeSpan.FromSeconds(20);
+
     /// <summary>
     /// The adapter this machine reaches the facility's networks through now, by its own routes:
     /// the VPN's. Null when none of them leads anywhere but back into the tunnel.
@@ -53,7 +59,7 @@ public sealed class Sharing(RecentLog log)
             ["EASYVPN_VPN_ID"] = vpn.Id,
             ["EASYVPN_VPN_NAME"] = vpn.Name,
             ["EASYVPN_VPN_DEVICE"] = vpn.Description,
-        }, ct);
+        }, ShareLimit, ct);
         if (code != 0) throw new InvalidOperationException($"Could not share {vpn.Name} with the workstations: {lines.LastOrDefault()}");
         lines.ForEach(log.Add);
     }
@@ -61,7 +67,7 @@ public sealed class Sharing(RecentLog log)
     /// <summary>Stops sharing, if the gateway was. A failure is logged: there is nothing more to do about it.</summary>
     public async Task UnshareAsync()
     {
-        var (code, lines) = await RunAsync("Unshare", [], CancellationToken.None);
+        var (code, lines) = await RunAsync("Unshare", [], UnshareLimit, CancellationToken.None);
         if (code != 0) log.Add($"Could not stop sharing the VPN with the workstations: {lines.LastOrDefault()}");
         else lines.ForEach(log.Add);
     }
@@ -69,19 +75,19 @@ public sealed class Sharing(RecentLog log)
     /// <summary>Whether sharing can be used here and what is shared now (empty for nothing), or the problem.</summary>
     public async Task<(bool Ok, string Text)> StatusAsync(CancellationToken ct)
     {
-        var (code, lines) = await RunAsync("Status", [], ct);
+        var (code, lines) = await RunAsync("Status", [], UnshareLimit, ct);
         if (code != 0) return (false, lines.LastOrDefault() ?? "sharing.ps1 failed");
         var shared = lines.FirstOrDefault(l => l.StartsWith("shared=", StringComparison.Ordinal))?["shared=".Length..];
         return (true, shared ?? "");
     }
 
-    private static async Task<(int Code, List<string> Lines)> RunAsync(string action, Dictionary<string, string> environment, CancellationToken ct)
+    private static async Task<(int Code, List<string> Lines)> RunAsync(string action, Dictionary<string, string> environment, TimeSpan limit, CancellationToken ct)
     {
         environment["EASYVPN_HUB"] = Defaults.GatewayAdapterGuid;
         environment["EASYVPN_HUB_NAME"] = Defaults.GatewayAdapter;
         environment["EASYVPN_HUB_ADDRESS"] = Defaults.TunnelHub;
         var lines = new List<string>();
-        var code = await PowerShell.RunFileAsync(Script, [action], environment, TimeSpan.FromMinutes(1), lines.Add, ct);
+        var code = await PowerShell.RunFileAsync(Script, [action], environment, limit, lines.Add, ct);
         return (code, lines);
     }
 

@@ -45,7 +45,6 @@ public sealed class MainViewModel : ObservableObject
         ToggleFavouriteCommand = new RelayCommand(p => ToggleFavourite(p as FacilityViewModel ?? Selected));
         RefreshCommand = new AsyncRelayCommand(LoadAsync);
         OpenLinkCommand = new RelayCommand(p => Try(() => Launcher.Open(((FacilityLink)p!).Url)));
-        OpenGatewayDesktopCommand = new RelayCommand(() => Try(() => Launcher.RemoteDesktop(GatewayHost)));
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
         ToggleGroupCommand = new RelayCommand(p =>
         {
@@ -79,7 +78,6 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ToggleFavouriteCommand { get; }
     public AsyncRelayCommand RefreshCommand { get; }
     public RelayCommand OpenLinkCommand { get; }
-    public RelayCommand OpenGatewayDesktopCommand { get; }
     public RelayCommand ClearSearchCommand { get; }
 
     /// <summary>Opens or closes a group.</summary>
@@ -237,9 +235,6 @@ public sealed class MainViewModel : ObservableObject
     public bool CanConnect => _selected is not null && !(SelectedIsActive && IsBusy);
     public bool CanDisconnect => SelectedIsActive && IsBusy;
 
-    /// <summary>While connecting, a VPN client on the gateway may be waiting for someone to sign in.</summary>
-    public bool CanOpenGatewayDesktop => SelectedIsActive && State == ConnectionState.Connecting;
-
     public string SelectedStateText => SelectedState switch
     {
         ConnectionState.Connecting => "Connecting",
@@ -258,8 +253,6 @@ public sealed class MainViewModel : ObservableObject
         : null;
 
     // ---------------------------------------------------------------- footer and tray
-
-    private string GatewayHost => _settings?.Gateway is { } gateway && Probe.TrySplit(gateway, out var host, out _) ? host : _settings?.Gateway ?? "";
 
     public string GatewayText =>
         !_agentOnline ? "The EasyVPN Agent service is not running on this PC"

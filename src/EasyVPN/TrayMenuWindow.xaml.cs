@@ -186,7 +186,7 @@ public partial class TrayMenuWindow : Window
     {
         if (sender is not ListBoxItem { DataContext: ListRow row }) return;
         e.Handled = true;
-        _model.Activate(row);
+        _model.Click(row);
     }
 
     private void OnOpenClick(object sender, RoutedEventArgs e)

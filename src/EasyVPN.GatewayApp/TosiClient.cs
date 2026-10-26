@@ -852,7 +852,9 @@ public static partial class TosiClient
     [GeneratedRegex(@"\btosi", RegexOptions.IgnoreCase)]
     private static partial Regex Product();
 
-    [GeneratedRegex(@"unins|uninstall|update|service|helper|crash|driver|tapctl|devcon|setup|openvpn|redist", RegexOptions.IgnoreCase)]
+    // TosiboxKeyAgent.exe, which Tosibox starts at sign-in, shows no window of its own: started
+    // instead of TosiboxKey.exe, it left the gateway waiting for one.
+    [GeneratedRegex(@"unins|uninstall|update|service|agent|helper|crash|driver|tapctl|devcon|setup|openvpn|redist", RegexOptions.IgnoreCase)]
     private static partial Regex NotTheClient();
 
     /// <summary>The client among Tosibox's programs: TosiboxKey.exe, or one called a client.</summary>

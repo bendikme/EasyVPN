@@ -88,6 +88,20 @@ public static class VpnRoutes
         ];
     }
 
+    /// <summary>
+    /// Whether every one of <paramref name="networks"/> is routed now on an adapter other than those
+    /// the gateway's own default route uses: the VPN that set them up is up, whenever it came up.
+    /// </summary>
+    public static bool AllPresent(IReadOnlyList<string> networks, IReadOnlyList<Route> now)
+    {
+        if (networks.Count == 0) return false;
+        var uplinks = now.Where(r => r.PrefixLength == 0).Select(r => r.Interface).ToHashSet();
+        var routed = now.Where(r => !uplinks.Contains(r.Interface))
+            .Select(r => new IPNetwork(r.Destination, r.PrefixLength).ToString())
+            .ToHashSet();
+        return networks.All(routed.Contains);
+    }
+
     private static IPAddress Broadcast(IPNetwork network)
     {
         var bytes = network.BaseAddress.GetAddressBytes();

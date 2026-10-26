@@ -57,6 +57,7 @@ public sealed class TrayMenuViewModel : ObservableObject
     private readonly Dictionary<string, GroupRow> _groups = new(StringComparer.CurrentCultureIgnoreCase);
     private readonly Dictionary<string, ConnectedRow> _connectedRows = new(StringComparer.OrdinalIgnoreCase);
     private readonly SectionRow _connected = new("CONNECTED");
+    private readonly SectionRow _failed = new("COULD NOT CONNECT");
     private readonly SectionRow _favourites = new("FAVOURITES");
     private readonly SectionRow _recent = new("RECENT");
     private readonly SectionRow _all = new("ALL FACILITIES");
@@ -74,6 +75,10 @@ public sealed class TrayMenuViewModel : ObservableObject
             if (p is GroupRow group) Toggle(group, !group.IsOpen);
         });
         DisconnectCommand = new RelayCommand(() => _main.DisconnectCommand.Execute(null));
+        ConnectCommand = new RelayCommand(p =>
+        {
+            if (p is FacilityRow { Facility: var facility }) Connect(facility);
+        });
         // A poll changes many things at once: the rows are built again once it is done.
         var dispatcher = Dispatcher.CurrentDispatcher;
         _main.PropertyChanged += (_, _) =>
@@ -94,6 +99,9 @@ public sealed class TrayMenuViewModel : ObservableObject
 
     public RelayCommand ToggleGroupCommand { get; }
     public RelayCommand DisconnectCommand { get; }
+
+    /// <summary>A facility row's Connect button: the only way a click connects.</summary>
+    public RelayCommand ConnectCommand { get; }
 
     /// <summary>The popup should go: a facility was chosen.</summary>
     public event Action? CloseRequested;
@@ -128,8 +136,8 @@ public sealed class TrayMenuViewModel : ObservableObject
         : _main.Active is { } active && _main.State != ConnectionState.Disconnected ? $"{StateWord(_main.State)}: {active.Name}"
         : "Not connected";
 
-    /// <summary>How the summary is coloured: Ok while connected, Problem when the gateway cannot be reached.</summary>
-    public CheckLevel? SummaryLevel => !_main.AgentOnline || !_main.Configured || !_main.GatewayOnline ? CheckLevel.Problem
+    /// <summary>How the summary is coloured: Ok while connected, Problem when the gateway cannot be reached or a connect failed.</summary>
+    public CheckLevel? SummaryLevel => !_main.AgentOnline || !_main.Configured || !_main.GatewayOnline || _main.State == ConnectionState.Failed ? CheckLevel.Problem
         : _main.State == ConnectionState.Connected ? CheckLevel.Ok
         : _main.State is ConnectionState.Connecting or ConnectionState.Interrupted or ConnectionState.Disconnecting ? CheckLevel.Warning
         : null;
@@ -156,7 +164,17 @@ public sealed class TrayMenuViewModel : ObservableObject
 
     public void OnHidden() => _visible = false;
 
-    /// <summary>A row clicked or Enter pressed on: a facility connects, the one connected shows in the window, a group opens or closes.</summary>
+    /// <summary>
+    /// A row clicked: a group opens or closes, the one connected shows in the window, and a facility
+    /// is only chosen - connecting it takes its Connect button, so a click in passing connects nothing.
+    /// </summary>
+    public void Click(ListRow row)
+    {
+        if (row is FacilityRow) SelectedRow = row;
+        else Activate(row);
+    }
+
+    /// <summary>Enter pressed on a row: a facility connects (the row shows its Connect button), the one connected shows in the window, a group opens or closes.</summary>
     public void Activate(ListRow? row)
     {
         switch (row)
@@ -285,11 +303,12 @@ public sealed class TrayMenuViewModel : ObservableObject
         }
         else
         {
-            // CONNECTED: the facility the gateway carries, or the last to fail.
+            // CONNECTED: the facility the gateway carries; or, under a title of its own, the last one
+            // that could not be connected, and why.
             var active = _main.State != ConnectionState.Disconnected ? _main.Active : null;
             if (active is not null)
             {
-                rows.Add(_connected);
+                rows.Add(_main.State == ConnectionState.Failed ? _failed : _connected);
                 var row = _connectedRows.TryGetValue(active.Id, out var kept) && kept.Facility == active ? kept : _connectedRows[active.Id] = new ConnectedRow(active);
                 row.StateText = StateWord(_main.State);
                 row.Message = _main.StatusMessage;

@@ -121,7 +121,65 @@
                 </Setter>
             </Style>
 
-            <!-- Rows: no inner padding, the templates own their spacing. A click on a row runs it. -->
+            <!-- Disconnect's twin, in the accent's colours: the only way a click connects a facility.
+                 Shown on the row under the mouse, and on the row chosen (whose Enter it is). -->
+            <Style x:Key="TrayConnectButton" TargetType="Button">
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushStrong}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="7,3,9,3" />
+                <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Command" Value="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" />
+                <Setter Property="CommandParameter" Value="{Binding}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{StaticResource RadiusSmall}"
+                                    SnapsToDevicePixels="True">
+                                <StackPanel Margin="{TemplateBinding Padding}" Orientation="Horizontal">
+                                    <Path x:Name="Glyph"
+                                          Style="{StaticResource TrayGlyph}"
+                                          Width="11"
+                                          Height="11"
+                                          StrokeThickness="1.9"
+                                          Stroke="{TemplateBinding Foreground}"
+                                          Data="{StaticResource TrayIconPower}" />
+                                    <TextBlock x:Name="Label"
+                                               Margin="5,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{TemplateBinding Foreground}"
+                                               Text="Connect" />
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                    <Setter TargetName="Glyph" Property="Stroke" Value="{DynamicResource AccentBrush}" />
+                                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                    <Setter TargetName="Glyph" Property="Stroke" Value="{DynamicResource OnAccentBrush}" />
+                                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Rows: no inner padding, the templates own their spacing. A click on a row chooses it;
+                 a group's opens or closes it, and the one connected shows it in the window. -->
             <Style x:Key="TrayRowContainerStyle" TargetType="ListBoxItem" BasedOn="{StaticResource RowContainerStyle}">
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="MinHeight" Value="0" />
@@ -174,12 +232,14 @@
                 </Grid>
             </DataTemplate>
 
-            <!-- A facility: its colour bar, name, group and kind; a star, a dot when it is the one. -->
+            <!-- A facility: its colour bar, name, group and kind; a star, a dot when it is the one;
+                 and, under the mouse or chosen, its Connect button. -->
             <DataTemplate DataType="{x:Type local:FacilityRow}">
                 <Grid Margin="8,5,10,5">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
@@ -214,7 +274,25 @@
                              Style="{StaticResource StateDotStyle}"
                              Tag="{Binding Facility.State}"
                              Visibility="{Binding Facility.IsActive, Converter={StaticResource Visible}}" />
+                    <Button x:Name="ConnectButton"
+                            Grid.Column="4"
+                            Margin="8,0,0,0"
+                            Style="{StaticResource TrayConnectButton}"
+                            Visibility="Collapsed"
+                            ToolTip="Connects this facility: the gateway brings up its VPN" />
                 </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                        <Setter TargetName="ConnectButton" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                        <Setter TargetName="ConnectButton" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <!-- Up already, or on its way: nothing to connect. -->
+                    <DataTrigger Binding="{Binding Facility.IsUp}" Value="True">
+                        <Setter TargetName="ConnectButton" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
             </DataTemplate>
         </ResourceDictionary>
     </Window.Resources>
