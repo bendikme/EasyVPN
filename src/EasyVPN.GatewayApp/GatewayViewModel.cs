@@ -25,11 +25,15 @@ public sealed class GatewayViewModel : ObservableObject
     private string? _pollProblem;
     private bool _polling;
     private bool _checking;
-    private DateTime _checked = DateTime.MinValue;
     private DateTime _checksRead = DateTime.MinValue;
     private bool _readingChecks;
     private string _facilities = "";
     private bool _updating;
+    private string _search = "";
+
+    // The customers' groups, kept so each keeps its place in the list, and those opened.
+    private readonly Dictionary<string, FacilityGroup> _groups = new(StringComparer.CurrentCultureIgnoreCase);
+    private readonly HashSet<string> _open = new(StringComparer.CurrentCultureIgnoreCase);
 
     public GatewayViewModel(LocalGateway gateway)
     {
@@ -44,6 +48,12 @@ public sealed class GatewayViewModel : ObservableObject
         StartServiceCommand = new RelayCommand(() =>
             Elevated.Start("powershell.exe", "-NoProfile -WindowStyle Hidden -Command Start-Service EasyVPN.Gateway", hidden: true));
         UpdateCommand = new AsyncRelayCommand(() => ActAsync(CanInstallUpdate ? _gateway.InstallUpdateAsync : _gateway.CheckUpdatesAsync));
+        ToggleGroupCommand = new RelayCommand(p =>
+        {
+            if (p is not FacilityGroup group) return;
+            if (!_open.Remove(group.Name)) _open.Add(group.Name);
+            Arrange();
+        });
         _timer.Tick += async (_, _) => await PollAsync();
     }
 
@@ -67,10 +77,37 @@ public sealed class GatewayViewModel : ObservableObject
     /// <summary>Installs the newer version found, or else looks for one.</summary>
     public AsyncRelayCommand UpdateCommand { get; }
 
+    /// <summary>Opens or closes a customer's group.</summary>
+    public RelayCommand ToggleGroupCommand { get; }
+
     public ObservableCollection<FacilityRow> Facilities { get; } = [];
+
+    /// <summary>
+    /// The list as shown: the facility carried first, under its own title, as in the workstations'
+    /// tray menu; then the rest in a group for each customer, which opens and closes - closed until
+    /// opened, and while searching, open wherever something matches.
+    /// </summary>
+    public ObservableCollection<object> Rows { get; } = [];
+
+    public string SearchText
+    {
+        get => _search;
+        set
+        {
+            if (SetProperty(ref _search, value)) Arrange();
+        }
+    }
+
+    /// <summary>A search that no customer's facility matches.</summary>
+    public bool NoMatches => _search.Trim().Length > 0 && !Rows.OfType<FacilityGroup>().Any();
+
+    public bool HasNoFacilities => _serviceOnline && _overview is not null && Facilities.Count == 0;
 
     /// <summary>What the gateway itself needs: the firewall, Layer 2.</summary>
     public ObservableCollection<CheckRow> SystemChecks { get; } = [];
+
+    /// <summary>Those of its own checks that are not fine: a banner each.</summary>
+    public IReadOnlyList<CheckRow> SystemProblems => [.. SystemChecks.Where(c => c.Level != CheckLevel.Ok)];
 
     public IReadOnlyList<string> FacilityProblems => _overview?.FacilityProblems ?? [];
 
@@ -79,6 +116,8 @@ public sealed class GatewayViewModel : ObservableObject
     public bool ServiceOnline => _serviceOnline;
 
     public string ServiceText => _serviceOnline ? "Service running" : "Service not running";
+
+    public CheckLevel ServiceLevel => _serviceOnline ? CheckLevel.Ok : CheckLevel.Problem;
 
     /// <summary>The last thing that went wrong in the app itself.</summary>
     public string? Error
@@ -128,9 +167,6 @@ public sealed class GatewayViewModel : ObservableObject
 
     private string ActiveName => Active?.Name ?? _overview?.Status.FacilityId ?? "the facility";
 
-    /// <summary>The port workstations reach the gateway on: its API, and the tunnel on it.</summary>
-    public string PortsText => $"Port {ApiPort}";
-
     // ---------------------------------------------------------------- activity
 
     /// <summary>
@@ -140,13 +176,6 @@ public sealed class GatewayViewModel : ObservableObject
     public ObservableCollection<LogLine> Activity { get; } = [];
 
     private const int ActivityLimit = 1000;
-
-    public string ActivityText => Activity.Count switch
-    {
-        0 => "",
-        1 => "1 line",
-        var n => $"{n} lines",
-    };
 
     /// <summary>Adds what is new in the service's latest lines.</summary>
     private void Collect(IReadOnlyList<LogLine> lines)
@@ -195,6 +224,9 @@ public sealed class GatewayViewModel : ObservableObject
 
     public string VersionText => Update is { } u ? $"Version {u.Current}" : "";
 
+    /// <summary>The update, in the status strip, when there is something to say: nothing when up to date.</summary>
+    public string UpdateNote => Update?.State == UpdateState.UpToDate ? "" : UpdateText;
+
     public string UpdateButtonText => CanInstallUpdate ? $"Install {Update!.Latest}" : "Check for updates";
 
     public bool CanUpdate => _serviceOnline && Update is { State: not (UpdateState.Checking or UpdateState.Downloading or UpdateState.Installing) };
@@ -210,7 +242,7 @@ public sealed class GatewayViewModel : ObservableObject
 
     public bool Checking => _checking;
 
-    public string ChecksText => _checking ? "Checking…" : _checked == DateTime.MinValue ? "" : $"Checked at {_checked:HH:mm}";
+    public string RefreshText => _checking ? "Checking…" : "Refresh";
 
     public int ProblemCount =>
         SystemChecks.Count(c => c.Level == CheckLevel.Problem)
@@ -317,10 +349,49 @@ public sealed class GatewayViewModel : ObservableObject
         {
             var carried = facility == active && State != ConnectionState.Disconnected;
             facility.State = carried ? State : null;
-            facility.Message = carried ? Message : null;
+            // "Connected to …" says no more than its state does.
+            facility.Message = carried && !(State == ConnectionState.Connected && Message == $"Connected to {facility.Name}") ? Message : null;
             facility.AskedBy = carried ? AskedBy : null;
         }
+        Arrange();
         return changed;
+    }
+
+    /// <summary>Lays out <see cref="Rows"/> again, leaving it be when nothing moved.</summary>
+    private void Arrange()
+    {
+        var carried = Facilities.FirstOrDefault(f => f.State is not null);
+        var terms = _search.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rows = new List<object>();
+        if (carried is not null)
+        {
+            rows.Add(new ListSection(carried.State == ConnectionState.Failed ? "COULD NOT CONNECT" : "CONNECTED"));
+            rows.Add(carried);
+            carried.InGroup = false;
+        }
+        var customers = Facilities.Where(f => f != carried && terms.All(f.Matches))
+            .GroupBy(f => string.IsNullOrWhiteSpace(f.Info.Customer) ? "Other" : f.Info.Customer.Trim(), StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (carried is not null && customers.Count > 0) rows.Add(new ListSection("ALL FACILITIES"));
+        foreach (var customer in customers)
+        {
+            if (!_groups.TryGetValue(customer.Key, out var group)) _groups[customer.Key] = group = new FacilityGroup(customer.Key);
+            group.Count = customer.Count();
+            group.NotReady = customer.Count(f => f.Level is CheckLevel.Warning or CheckLevel.Problem);
+            group.IsOpen = terms.Length > 0 || _open.Contains(customer.Key);
+            rows.Add(group);
+            if (!group.IsOpen) continue;
+            foreach (var facility in customer) facility.InGroup = true;
+            rows.AddRange(customer);
+        }
+        // In place, so a group opening or closing leaves the list where it was scrolled to.
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (i >= Rows.Count) Rows.Add(rows[i]);
+            else if (!Equals(Rows[i], rows[i])) Rows[i] = rows[i];
+        }
+        while (Rows.Count > rows.Count) Rows.RemoveAt(Rows.Count - 1);
+        OnPropertyChanged(nameof(NoMatches));
     }
 
     /// <summary>
@@ -340,7 +411,6 @@ public sealed class GatewayViewModel : ObservableObject
             foreach (var result in run.Results.Where(r => r.FacilityId is null)) SystemChecks.Add(new CheckRow(result));
             foreach (var facility in Facilities)
                 facility.Readiness = run.Results.FirstOrDefault(r => string.Equals(r.FacilityId, facility.Id, StringComparison.OrdinalIgnoreCase));
-            if (_checking && !run.Running || !run.Running && _checked == DateTime.MinValue) _checked = DateTime.Now;
             _checking = run.Running || refresh;
         }
         catch (GatewayException ex) when (!ex.ServiceDown)
@@ -403,11 +473,55 @@ public sealed class GatewayViewModel : ObservableObject
     }
 }
 
+/// <summary>A title in the facility list: the connection, or all the rest.</summary>
+public sealed record ListSection(string Title)
+{
+    public bool IsSelectable => false;
+    public bool IsGroup => false;
+}
+
+/// <summary>A customer's facilities in the list: a row of its own, which opens and closes them.</summary>
+public sealed class FacilityGroup(string name) : ObservableObject
+{
+    private int _count;
+    private int _notReady;
+    private bool _open;
+
+    public string Name { get; } = name;
+    public bool IsSelectable => true;
+    public bool IsGroup => true;
+
+    public int Count
+    {
+        get => _count;
+        set => SetProperty(ref _count, value);
+    }
+
+    public bool IsOpen
+    {
+        get => _open;
+        set => SetProperty(ref _open, value);
+    }
+
+    /// <summary>Its facilities whose check found something: said on the group, so a closed one hides none.</summary>
+    public int NotReady
+    {
+        get => _notReady;
+        set
+        {
+            if (SetProperty(ref _notReady, value)) OnPropertyChanged(nameof(NotReadyText));
+        }
+    }
+
+    public string? NotReadyText => _notReady == 0 ? null : $"{_notReady} not ready";
+}
+
 /// <summary>A facility in the list: what it is, whether it is the one connected, and whether its VPN client is ready.</summary>
 public sealed class FacilityRow(FacilityInfo info) : ObservableObject
 {
     private ConnectionState? _state;
     private CheckResult? _readiness;
+    private bool _inGroup;
     private string? _message;
     private string? _askedBy;
 
@@ -415,13 +529,28 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
     public string Id => Info.Id;
     public string Name => Info.Name;
 
+    public bool IsSelectable => true;
+    public bool IsGroup => false;
+
+    /// <summary>In its customer's group, indented under it; not when it is the one carried, on top.</summary>
+    public bool InGroup
+    {
+        get => _inGroup;
+        set => SetProperty(ref _inGroup, value);
+    }
+
+    /// <summary>What it is, under its name: its customer is the group it is listed in.</summary>
     public string Details => string.Join("  ·  ", new[]
     {
-        Info.Customer,
         Info.Connector,
-        Info.Layer2 ? "Layer 2" : Info.Routes.Count == 0 ? "networks from its VPN" : string.Join(", ", Info.Routes),
-        Info.Check is { } check ? $"check {check}" : "no check",
+        Info.Layer2 ? "Layer 2" : string.Join(", ", Info.Routes),
+        Info.Check is { } check ? $"check {check}" : "",
     }.Where(s => s.Length > 0));
+
+    /// <summary>Whether a word of a search is in its name, customer, VPN client, networks or notes.</summary>
+    public bool Matches(string term) =>
+        new[] { Info.Name, Info.Customer, Info.Connector, Info.Notes ?? "", string.Join(" ", Info.Routes) }
+            .Any(text => text.Contains(term, StringComparison.CurrentCultureIgnoreCase));
 
     /// <summary>Set while this is the facility the gateway carries.</summary>
     public ConnectionState? State
@@ -429,9 +558,19 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
         get => _state;
         set
         {
-            if (SetProperty(ref _state, value)) Raise(nameof(IsCarried), nameof(IsLeaving), nameof(IsFree));
+            if (SetProperty(ref _state, value)) Raise(nameof(IsCarried), nameof(IsLeaving), nameof(IsFree), nameof(StateText));
         }
     }
+
+    public string? StateText => _state switch
+    {
+        ConnectionState.Connecting => "Connecting",
+        ConnectionState.Connected => "Connected",
+        ConnectionState.Interrupted => "Interrupted",
+        ConnectionState.Disconnecting => "Disconnecting",
+        ConnectionState.Failed => "Failed",
+        _ => null,
+    };
 
     /// <summary>The gateway carries it, or is getting to: Disconnect, rather than Connect.</summary>
     public bool IsCarried => _state is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted;
@@ -446,14 +585,23 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
     public string? Message
     {
         get => _message;
-        set => SetProperty(ref _message, value);
+        set
+        {
+            if (SetProperty(ref _message, value)) Raise(nameof(Doing));
+        }
     }
 
     public string? AskedBy
     {
         get => _askedBy;
-        set => SetProperty(ref _askedBy, value);
+        set
+        {
+            if (SetProperty(ref _askedBy, value)) Raise(nameof(Doing));
+        }
     }
+
+    /// <summary>The latest step, and who asked for it, on one line.</summary>
+    public string? Doing => string.Join("  ·  ", new[] { _message, _askedBy }.Where(s => !string.IsNullOrEmpty(s))) is { Length: > 0 } text ? text : null;
 
     public CheckResult? Readiness
     {

@@ -82,13 +82,31 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
+        <!-- In place of the facility: a title, a sentence, and the one thing to do about it. -->
+        <Style x:Key="EmptyTitleStyle" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeMedium}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="EmptyTextStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,6,0,16" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        </Style>
+
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid x:Name="Root">
+    <Grid x:Name="Root" Background="{DynamicResource BackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="44" />
+            <RowDefinition Height="{StaticResource TitleStripHeight}" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -111,20 +129,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="24" Height="24" CornerRadius="5">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                <GradientStop Offset="0" Color="#FF2A94FF" />
-                                <GradientStop Offset="1" Color="#FF004CCC" />
-                            </LinearGradientBrush>
-                        </Border.Background>
-                        <Viewbox Width="18" Height="18">
-                            <Canvas Width="24" Height="24">
-                                <Path Data="{StaticResource GeoShield}" Fill="White" />
-                                <Path Data="{StaticResource GeoKeyhole}" Fill="#FF0058D6" />
-                            </Canvas>
-                        </Viewbox>
-                    </Border>
+                    <ContentControl Template="{StaticResource BrandMarkTemplate}" Focusable="False" />
                     <TextBlock Text="EasyVPN"
                                Margin="9,0,0,0"
                                FontSize="{StaticResource FontSizeMedium}"
@@ -176,6 +181,7 @@
                 </Grid>
 
                 <StackPanel Grid.Column="3"
+                            Margin="0,0,8,0"
                             Orientation="Horizontal"
                             VerticalAlignment="Center"
                             WindowChrome.IsHitTestVisibleInChrome="True">
@@ -190,7 +196,7 @@
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource ToolbarButtonStyle}"
-                            Margin="4,0,8,0"
+                            Margin="4,0,0,0"
                             Click="OnSettingsClick"
                             ToolTip="The gateway this PC uses, and starting with Windows">
                         <StackPanel Orientation="Horizontal">
@@ -210,10 +216,15 @@
             </Grid>
         </Border>
 
+        <!-- ============================================================ banners: what went wrong in the app -->
+        <Border Grid.Row="1" Style="{StaticResource BannerStyle}" Visibility="{Binding Error, Converter={StaticResource Visible}}">
+            <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+        </Border>
+
         <!-- ============================================================
              Body: facilities on the left, the selected one on the right
              ============================================================ -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300" />
                 <ColumnDefinition Width="Auto" />
@@ -273,10 +284,8 @@
                                     <Path Style="{StaticResource IconFrameStyle}" Data="{StaticResource GeoStar}" Fill="{DynamicResource WarningBrush}" />
                                 </Viewbox>
                                 <Ellipse Grid.Column="2"
-                                         Width="8"
-                                         Height="8"
                                          Margin="8,0,2,0"
-                                         Style="{StaticResource StateDotStyle}"
+                                         Style="{StaticResource StatusDotStyle}"
                                          Tag="{Binding Facility.State}"
                                          Visibility="{Binding Facility.IsActive, Converter={StaticResource Visible}}" />
                             </Grid>
@@ -299,245 +308,208 @@
                            TextAlignment="Center"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource TextMutedBrush}"
-                           Text="The gateway has no facilities yet. They are defined in facilities.json on the gateway."
+                           Text="The gateway has no facilities yet. They are added in the EasyVPN Gateway app, on the gateway."
                            Visibility="{Binding HasNoFacilities, Converter={StaticResource Visible}}" />
             </Grid>
 
             <Border Grid.Column="1" Width="1" Background="{DynamicResource BorderBrushSoft}" />
 
-            <ScrollViewer Grid.Column="2" Style="{StaticResource AppScrollViewerStyle}" Padding="28,22,28,22">
-                <StackPanel MaxWidth="820" HorizontalAlignment="Stretch">
+            <!-- The selected facility: its header stays, its details scroll. -->
+            <Grid Grid.Column="2" Visibility="{Binding ShowFacility, Converter={StaticResource Visible}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                    <Border Margin="0,0,0,16"
-                            Padding="12,8"
-                            Background="{DynamicResource DangerSubtleBrush}"
-                            BorderBrush="{DynamicResource DangerBrush}"
-                            BorderThickness="1"
-                            CornerRadius="{StaticResource RadiusMedium}"
-                            Visibility="{Binding Error, Converter={StaticResource Visible}}">
-                        <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
-                    </Border>
-
-                    <Border Style="{StaticResource CardBorderStyle}"
-                            Padding="20"
-                            Margin="0,0,0,20"
-                            Visibility="{Binding AgentOnline, Converter={StaticResource Visible}, ConverterParameter=invert}">
-                        <StackPanel>
-                            <TextBlock Text="The EasyVPN Agent is not running" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
-                            <TextBlock Margin="0,8,0,0"
-                                       TextWrapping="Wrap"
-                                       Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="The agent is the Windows service that keeps the EasyVPN adapter, routes and DNS rules on this PC. Start the &quot;EasyVPN Agent&quot; service, or install EasyVPN again." />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource CardBorderStyle}"
-                            Padding="20"
-                            Margin="0,0,0,20"
-                            Visibility="{Binding ShowSetup, Converter={StaticResource Visible}}">
-                        <StackPanel>
-                            <TextBlock Text="Connect this PC to a gateway" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
-                            <TextBlock Margin="0,8,0,14"
-                                       TextWrapping="Wrap"
-                                       Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="The gateway is the machine that runs the customers' VPN clients. Its administrator has its address and access key: EasyVPN.Gateway.exe info prints them." />
-                            <Button Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" Content="Open settings" Click="OnSettingsClick" />
-                        </StackPanel>
-                    </Border>
-
-                    <!-- The selected facility -->
-                    <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource Visible}}">
-                        <TextBlock Text="{Binding Selected.Customer}" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding Selected.Name}"
-                                       FontSize="{StaticResource FontSizeTitle}"
-                                       FontWeight="SemiBold"
-                                       TextTrimming="CharacterEllipsis"
-                                       VerticalAlignment="Center" />
-                            <Viewbox Width="15"
-                                     Height="15"
-                                     Margin="10,0,0,0"
-                                     VerticalAlignment="Center"
-                                     Visibility="{Binding Selected.IsFavourite, Converter={StaticResource Visible}}">
-                                <Path Style="{StaticResource IconFrameStyle}" Data="{StaticResource GeoStar}" Fill="{DynamicResource WarningBrush}" />
+                <StackPanel Margin="24,20,24,16" MaxWidth="820" HorizontalAlignment="Stretch">
+                    <TextBlock Text="{Binding Selected.Customer}" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,2" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Selected.Name}"
+                                   FontSize="{StaticResource FontSizeTitle}"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" />
+                        <!-- A favourite's star, filled; any other's, outlined: a click turns it over. -->
+                        <Button Margin="8,2,0,0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource IconButtonStyle}"
+                                Command="{Binding ToggleFavouriteCommand}"
+                                ToolTip="{Binding FavouriteText}">
+                            <Viewbox Width="16" Height="16">
+                                <Path Data="{StaticResource GeoStar}" StrokeThickness="1.6" StrokeLineJoin="Round">
+                                    <Path.Style>
+                                        <Style TargetType="Path" BasedOn="{StaticResource IconFrameStyle}">
+                                            <Setter Property="Fill" Value="Transparent" />
+                                            <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Selected.IsFavourite}" Value="True">
+                                                    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                                    <Setter Property="Stroke" Value="{DynamicResource WarningBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Path.Style>
+                                </Path>
                             </Viewbox>
-                            <Border Style="{StaticResource StatusPillStyle}" Margin="12,0,0,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="7" Height="7" Style="{StaticResource StateDotStyle}" Tag="{Binding SelectedState}" />
-                                    <TextBlock Text="{Binding SelectedStateText}"
-                                               Margin="6,0,0,0"
-                                               FontSize="{StaticResource FontSizeSmall}"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" />
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                        <TextBlock Text="{Binding Selected.Summary}"
-                                   Margin="0,6,0,0"
-                                   FontSize="{StaticResource FontSizeMedium}"
-                                   Foreground="{DynamicResource TextSecondaryBrush}" />
-
-                        <!-- Connecting is the one thing done most; while connected, the same place ends it. -->
-                        <WrapPanel Margin="0,18,0,0">
-                            <Button Style="{StaticResource PrimaryButtonStyle}"
-                                    MinWidth="120"
-                                    Margin="0,0,8,0"
-                                    Content="Connect"
-                                    Command="{Binding ConnectCommand}"
-                                    Visibility="{Binding CanConnect, Converter={StaticResource Visible}}" />
-                            <Button Style="{StaticResource DangerButtonStyle}"
-                                    MinWidth="120"
-                                    Margin="0,0,8,0"
-                                    Content="Disconnect"
-                                    Command="{Binding DisconnectCommand}"
-                                    Visibility="{Binding CanDisconnect, Converter={StaticResource Visible}}" />
-                            <Button Style="{StaticResource SecondaryButtonStyle}"
-                                    Content="{Binding FavouriteText}"
-                                    Command="{Binding ToggleFavouriteCommand}" />
-                        </WrapPanel>
-
-                        <TextBlock Text="{Binding SelectedMessage}"
-                                   Margin="0,12,0,0"
-                                   TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Visibility="{Binding SelectedMessage, Converter={StaticResource Visible}}" />
-
-                        <Border Style="{StaticResource CardBorderStyle}" Margin="0,20,0,0" Padding="16,14,16,6">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Style="{StaticResource FactLabelStyle}" Text="Link" />
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Link}" />
-
-                                <TextBlock Grid.Row="1" Style="{StaticResource FactLabelStyle}" Text="Networks" Visibility="{Binding Selected.Routes, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Routes}" Visibility="{Binding Selected.Routes, Converter={StaticResource Visible}}" />
-
-                                <TextBlock Grid.Row="2" Style="{StaticResource FactLabelStyle}" Text="DNS" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Dns}" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
-
-                                <TextBlock Grid.Row="3" Style="{StaticResource FactLabelStyle}" Text="Checked at" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Check}" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
-
-                                <TextBlock Grid.Row="4" Style="{StaticResource FactLabelStyle}" Text="VPN client" />
-                                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Info.Connector}" />
-
-                                <TextBlock Grid.Row="5" Style="{StaticResource FactLabelStyle}" Text="Notes" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
-                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Notes}" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
-                            </Grid>
-                        </Border>
-
-                        <StackPanel Margin="0,20,0,0" Visibility="{Binding Selected.Links, Converter={StaticResource Visible}}">
-                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="OPEN" />
-                            <ItemsControl ItemsSource="{Binding Selected.Links}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Button Style="{StaticResource SecondaryButtonStyle}"
-                                                Margin="0,0,8,8"
-                                                Content="{Binding Name}"
-                                                ToolTip="{Binding Url}"
-                                                Command="{Binding DataContext.OpenLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
+                        </Button>
+                        <Ellipse Margin="14,2,7,0" Style="{StaticResource StatusDotStyle}" Tag="{Binding SelectedState}" Visibility="{Binding ShowSelectedState, Converter={StaticResource Visible}}" />
+                        <TextBlock Margin="0,2,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding SelectedStateText}"
+                                   Visibility="{Binding ShowSelectedState, Converter={StaticResource Visible}}" />
                     </StackPanel>
 
-                    <!-- What this PC and the gateway did lately: the place to look when a connection fails,
-                         kept low - its last few lines, more when asked for. -->
-                    <StackPanel Margin="0,28,0,0" Visibility="{Binding HasActivity, Converter={StaticResource Visible}}">
-                        <DockPanel Margin="0,0,0,4">
-                            <Button DockPanel.Dock="Right"
-                                    Padding="6,1"
-                                    MinHeight="0"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    FontSize="{StaticResource FontSizeSmall}"
-                                    Content="{Binding MoreActivityText}"
-                                    Command="{Binding MoreActivityCommand}" />
-                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="RECENT ACTIVITY" />
-                        </DockPanel>
-                        <ItemsControl ItemsSource="{Binding Log}"
-                                      TextElement.FontSize="{StaticResource FontSizeSmall}"
-                                      TextElement.Foreground="{DynamicResource TextMutedBrush}">
+                    <TextBlock Text="{Binding SelectedMessage}"
+                               Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               Visibility="{Binding SelectedMessage, Converter={StaticResource Visible}}" />
+
+                    <!-- Connecting is the one thing done most; while connected, the same place ends it.
+                         What the facility offers to open sits beside it. -->
+                    <WrapPanel Margin="0,16,0,0">
+                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                MinWidth="120"
+                                Margin="0,0,8,8"
+                                Content="Connect"
+                                Command="{Binding ConnectCommand}"
+                                Visibility="{Binding CanConnect, Converter={StaticResource Visible}}" />
+                        <Button Style="{StaticResource DangerButtonStyle}"
+                                MinWidth="120"
+                                Margin="0,0,8,8"
+                                Content="Disconnect"
+                                Command="{Binding DisconnectCommand}"
+                                Visibility="{Binding CanDisconnect, Converter={StaticResource Visible}}" />
+                        <ItemsControl ItemsSource="{Binding Selected.Links}" Focusable="False">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="0,1">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="56" />
-                                            <ColumnDefinition Width="56" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}" />
-                                        <TextBlock Grid.Column="1" Opacity="0.7" Text="{Binding Source}" />
-                                        <TextBlock Grid.Column="2" TextWrapping="Wrap" Text="{Binding Text}" />
-                                    </Grid>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}"
+                                            Margin="0,0,8,8"
+                                            Content="{Binding Name}"
+                                            ToolTip="{Binding Url}"
+                                            Command="{Binding DataContext.OpenLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </StackPanel>
+                    </WrapPanel>
                 </StackPanel>
-            </ScrollViewer>
+
+                <ScrollViewer Grid.Row="1" Style="{StaticResource AppScrollViewerStyle}" Padding="24,0,24,20">
+                    <Border MaxWidth="820" HorizontalAlignment="Stretch" Style="{StaticResource CardBorderStyle}" Padding="16,14,16,6" VerticalAlignment="Top">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Style="{StaticResource FactLabelStyle}" Text="Networks" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Routes}" />
+
+                            <TextBlock Grid.Row="1" Style="{StaticResource FactLabelStyle}" Text="Adapter" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Link}" />
+
+                            <TextBlock Grid.Row="2" Style="{StaticResource FactLabelStyle}" Text="DNS" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Dns}" Visibility="{Binding Selected.Dns, Converter={StaticResource Visible}}" />
+
+                            <TextBlock Grid.Row="3" Style="{StaticResource FactLabelStyle}" Text="Check" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Check}" Visibility="{Binding Selected.Check, Converter={StaticResource Visible}}" />
+
+                            <TextBlock Grid.Row="4" Style="{StaticResource FactLabelStyle}" Text="VPN client" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Info.Connector}" />
+
+                            <TextBlock Grid.Row="5" Style="{StaticResource FactLabelStyle}" Text="Notes" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
+                            <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource FactValueStyle}" Text="{Binding Selected.Notes}" Visibility="{Binding Selected.Notes, Converter={StaticResource Visible}}" />
+                        </Grid>
+                    </Border>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- In place of the facility: the agent missing, or no gateway chosen yet. -->
+            <StackPanel Grid.Column="2" MaxWidth="440" Margin="24" VerticalAlignment="Center"
+                        Visibility="{Binding AgentOnline, Converter={StaticResource Visible}, ConverterParameter=invert}">
+                <TextBlock Style="{StaticResource EmptyTitleStyle}" Text="The EasyVPN Agent is not running" />
+                <TextBlock Style="{StaticResource EmptyTextStyle}"
+                           Text="The agent is the Windows service that keeps the EasyVPN adapter, routes and DNS rules on this PC. Start the &quot;EasyVPN Agent&quot; service, or install EasyVPN again." />
+            </StackPanel>
+            <StackPanel Grid.Column="2" MaxWidth="440" Margin="24" VerticalAlignment="Center"
+                        Visibility="{Binding ShowSetup, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource EmptyTitleStyle}" Text="Connect this PC to a gateway" />
+                <TextBlock Style="{StaticResource EmptyTextStyle}"
+                           Text="The gateway is the machine that runs the customers' VPN clients. Its EasyVPN Gateway app gives its address and access key, under Workstations." />
+                <Button Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Center" Content="Open settings" Click="OnSettingsClick" />
+            </StackPanel>
         </Grid>
 
         <!-- ============================================================
-             Status strip: the gateway, the tunnel and updates
+             Activity: what this PC and the gateway did lately, newest
+             first - the place to look when a connection fails. Folds away.
              ============================================================ -->
-        <Border Grid.Row="2"
-                Padding="14,5"
-                Background="{DynamicResource SurfaceBrush}"
-                BorderBrush="{DynamicResource BorderBrushSoft}"
-                BorderThickness="0,1,0,0">
+        <StackPanel Grid.Row="3" Background="{DynamicResource SurfaceBrush}">
+            <Border Style="{StaticResource PanelHeaderStyle}">
+                <DockPanel>
+                    <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ChevronToggleStyle}" IsChecked="{Binding ShowActivity}" ToolTip="Shows or hides the activity" />
+                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0" VerticalAlignment="Center" Text="ACTIVITY" />
+                </DockPanel>
+            </Border>
+            <ScrollViewer Height="150" Style="{StaticResource AppScrollViewerStyle}" Padding="24,0,16,8" Visibility="{Binding ShowActivity, Converter={StaticResource Visible}}">
+                <Grid>
+                    <TextBlock Foreground="{DynamicResource TextMutedBrush}" FontSize="{StaticResource FontSizeSmall}" Text="Nothing yet."
+                               Visibility="{Binding HasActivity, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                    <ItemsControl ItemsSource="{Binding Log}"
+                                  TextElement.FontSize="{StaticResource FontSizeSmall}"
+                                  TextElement.Foreground="{DynamicResource TextSecondaryBrush}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="60" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Foreground="{DynamicResource TextMutedBrush}" Text="{Binding Time.LocalDateTime, StringFormat=HH:mm:ss}" />
+                                    <TextBlock Grid.Column="1" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding Source}" />
+                                    <TextBlock Grid.Column="2" TextWrapping="Wrap" Text="{Binding Text}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </ScrollViewer>
+        </StackPanel>
+
+        <!-- ============================================================
+             Status strip: the connection, the gateway; updates
+             ============================================================ -->
+        <Border Grid.Row="4" Style="{StaticResource StatusStripStyle}">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Right"
-                           VerticalAlignment="Center"
-                           Text="{Binding TunnelText}"
-                           FontSize="{StaticResource FontSizeSmall}"
-                           Foreground="{DynamicResource TextMutedBrush}" />
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0">
-                    <TextBlock VerticalAlignment="Center"
-                               Text="{Binding UpdateText}"
-                               FontSize="{StaticResource FontSizeSmall}"
-                               Foreground="{DynamicResource TextMutedBrush}" />
-                    <Button Margin="8,0,0,0"
-                            Padding="6,1"
-                            MinHeight="0"
-                            Style="{StaticResource SubtleButtonStyle}"
-                            FontSize="{StaticResource FontSizeSmall}"
-                            Content="{Binding UpdateButtonText}"
-                            IsEnabled="{Binding CanUpdate}"
-                            Click="OnUpdateClick" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock Margin="0,0,6,0" Style="{StaticResource StatusTextStyle}" Text="{Binding UpdateNote}" Visibility="{Binding UpdateNote, Converter={StaticResource Visible}}" />
+                    <Button Style="{StaticResource StatusLinkButtonStyle}" Content="{Binding UpdateButtonText}" IsEnabled="{Binding CanUpdate}" Click="OnUpdateClick" />
+                    <TextBlock Style="{StaticResource StatusSeparatorStyle}" Margin="4,0,10,0" Visibility="{Binding VersionText, Converter={StaticResource Visible}}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding VersionText}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center">
-                        <Ellipse.Style>
-                            <Style TargetType="Ellipse">
-                                <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding GatewayOnline}" Value="True">
-                                        <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Ellipse.Style>
-                    </Ellipse>
-                    <TextBlock Text="{Binding GatewayText}"
-                               FontSize="{StaticResource FontSizeSmall}"
-                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <Ellipse Margin="0,0,7,0" Style="{StaticResource StatusDotStyle}" Tag="{Binding State}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding ConnectionText}" />
+                    <TextBlock Style="{StaticResource StatusSeparatorStyle}" />
+                    <Ellipse Margin="0,0,7,0" Style="{StaticResource StatusDotStyle}" Tag="{Binding GatewayLevel}" />
+                    <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding GatewayText}" />
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding TunnelWarning, Converter={StaticResource Visible}}">
+                        <TextBlock Style="{StaticResource StatusSeparatorStyle}" />
+                        <TextBlock Style="{StaticResource StatusTextStyle}" Foreground="{DynamicResource WarningBrush}" Text="{Binding TunnelWarning}" />
+                    </StackPanel>
                 </StackPanel>
             </DockPanel>
         </Border>

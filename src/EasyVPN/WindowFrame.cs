@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
@@ -40,6 +41,10 @@ public static class WindowFrame
         root.Margin = inset;
         if (WindowChrome.GetWindowChrome(window) is { } chrome) chrome.CaptionHeight = CaptionHeight + inset.Top;
     }
+
+    /// <summary>A dialog in DialogWindowStyle: its strip's close button closes it.</summary>
+    public static void Dialog(Window window) =>
+        window.CommandBindings.Add(new CommandBinding(SystemCommands.CloseWindowCommand, (_, _) => SystemCommands.CloseWindow(window)));
 
     public static void ToggleMaximized(Window window)
     {

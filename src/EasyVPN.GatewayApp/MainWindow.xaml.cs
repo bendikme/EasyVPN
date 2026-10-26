@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -22,9 +23,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = model;
         SourceInitialized += (_, _) => ThemeService.TitleBar(this);
-        // The header's dot follows the service; a style trigger would need a converter for one dot.
-        model.PropertyChanged += (_, _) =>
-            ServiceDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, model.ServiceOnline ? "SuccessBrush" : "DangerBrush");
+        InputBindings.Add(new KeyBinding(new RelayCommand(() => SearchBox.Focus()), Key.F, ModifierKeys.Control));
+
+        // The flyout hangs from its button's right edge, under the title strip: the visible edge of
+        // its border, inside the room its shadow takes.
+        WorkstationsPopup.CustomPopupPlacementCallback = (popup, target, _) =>
+        {
+            var room = (Thickness)FindResource("PopupShadowRoom");
+            var scale = VisualTreeHelper.GetDpi(this);
+            return [new CustomPopupPlacement(
+                new Point(target.Width - popup.Width + room.Right * scale.DpiScaleX, target.Height + (6 - room.Top) * scale.DpiScaleY),
+                PopupPrimaryAxis.Horizontal)];
+        };
 
         // Scrolled once the list has taken the new lines in, and once for all of them: scrolling from
         // inside the change itself makes the list measure itself before it has heard of the line.
@@ -86,6 +96,12 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private void OnClearSearchClick(object sender, RoutedEventArgs e)
+    {
+        ((GatewayViewModel)DataContext).SearchText = "";
+        SearchBox.Focus();
+    }
+
     private void OnCopyActivityClick(object sender, RoutedEventArgs e) => CopyActivity();
 
     private void OnCopyActivity(object sender, ExecutedRoutedEventArgs e) => CopyActivity();
@@ -123,8 +139,6 @@ public partial class MainWindow : Window
         }
         base.OnClosing(e);
     }
-
-    private void OnEncryptPasswordClick(object sender, RoutedEventArgs e) => new PasswordWindow { Owner = this }.ShowDialog();
 
     private void OnUpdateClick(object sender, RoutedEventArgs e)
     {

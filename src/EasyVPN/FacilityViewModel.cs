@@ -21,9 +21,10 @@ public sealed class FacilityViewModel(FacilityInfo info, bool favourite) : Obser
     public string Routes => Info.Routes.Count == 0 && !Info.Layer2 ? "those its VPN sets up when it connects" : string.Join(", ", Info.Routes);
     public string Summary => $"{Info.Connector} · {(Info.Layer2 ? "Layer 2" : Info.Routes.Count == 0 ? "networks from its VPN" : Routes)}";
 
+    /// <summary>The adapter on this PC it comes in on, and how.</summary>
     public string Link => Info.Layer2
-        ? $"Layer 2: the facility's LAN, on this PC's \"{Defaults.Layer2Adapter}\" adapter"
-        : $"Routed: the networks below, on this PC's \"{Defaults.TunnelAdapter}\" adapter";
+        ? $"{Defaults.Layer2Adapter}, on the facility's LAN (Layer 2)"
+        : $"{Defaults.TunnelAdapter}, routed";
     public string? Dns => Info.Dns is { Domains.Count: > 0 } dns ? $"{string.Join(", ", dns.Domains)} via {string.Join(", ", dns.Servers)}" : null;
     public string? Check => Info.Check;
     public string? Notes => Info.Notes;

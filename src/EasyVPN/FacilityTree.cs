@@ -107,8 +107,8 @@ public static class FacilityTree
 {
     public const double IndentStep = 14;
 
-    /// <summary>Up to this many facilities, groups start open; with more, closed - a list of a hundred Tosibox Locks is not read in full.</summary>
-    public const int OpenUpTo = 15;
+    /// <summary>Groups start closed, as the gateway app's do: a list of a hundred Tosibox Locks is not read in full.</summary>
+    public const bool OpenByDefault = false;
 
     private sealed class Node(string path)
     {

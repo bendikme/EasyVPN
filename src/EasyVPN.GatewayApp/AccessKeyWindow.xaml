@@ -1,36 +1,36 @@
 <Window x:Class="EasyVPN.GatewayApp.AccessKeyWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EasyVPN Gateway access key"
-        Style="{StaticResource AppWindowStyle}"
+        Title="Access key"
+        Style="{StaticResource DialogWindowStyle}"
         Icon="pack://application:,,,/Assets/easyvpn.ico"
         Width="520"
         SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen">
 
-    <StackPanel Margin="24,20,24,22">
-        <TextBlock Text="Access key" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
-        <TextBlock Margin="0,6,0,0"
-                   TextWrapping="Wrap"
-                   Foreground="{DynamicResource TextMutedBrush}"
-                   Text="Each workstation needs it once, in EasyVPN's Settings. Anyone with it, and a way to this machine, can use the gateway: hand it over as you would a password." />
-
-        <TextBox x:Name="KeyBox"
-                 Margin="0,16,0,0"
-                 Style="{StaticResource AppTextBoxStyle}"
-                 FontFamily="Consolas"
-                 IsReadOnly="True" />
-
-        <TextBlock x:Name="ErrorText"
-                   Margin="0,12,0,0"
-                   TextWrapping="Wrap"
-                   Foreground="{DynamicResource DangerBrush}"
-                   Visibility="Collapsed" />
-
-        <StackPanel Margin="0,22,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="CopyButton" Style="{StaticResource SecondaryButtonStyle}" Content="Copy" Click="OnCopyClick" />
-            <Button Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" Content="Close" IsCancel="True" IsDefault="True" Click="OnCloseClick" />
+    <StackPanel>
+        <StackPanel Margin="24,18,24,22">
+            <TextBlock TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Text="Each workstation needs it once, in EasyVPN's Settings. Anyone with it, and a way to this machine, can use the gateway: hand it over as you would a password." />
+            <TextBox x:Name="KeyBox"
+                     Margin="0,14,0,0"
+                     Style="{StaticResource AppTextBoxStyle}"
+                     FontFamily="Consolas"
+                     IsReadOnly="True" />
+            <TextBlock x:Name="ErrorText"
+                       Margin="0,12,0,0"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource DangerBrush}"
+                       Visibility="Collapsed" />
         </StackPanel>
+
+        <Border Style="{StaticResource DialogFooterStyle}">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource SecondaryButtonStyle}" Content="Close" IsCancel="True" Click="OnCloseClick" />
+                <Button x:Name="CopyButton" Margin="8,0,0,0" Style="{StaticResource PrimaryButtonStyle}" Content="Copy" IsDefault="True" Click="OnCopyClick" />
+            </StackPanel>
+        </Border>
     </StackPanel>
 </Window>

@@ -15,6 +15,7 @@ public partial class AccessKeyWindow : Window
     public AccessKeyWindow()
     {
         InitializeComponent();
+        WindowFrame.Dialog(this);
         SourceInitialized += (_, _) => ThemeService.TitleBar(this);
         try
         {

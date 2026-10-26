@@ -14,6 +14,7 @@ public partial class SettingsWindow : Window
         _agent = agent;
         _user = user;
         InitializeComponent();
+        WindowFrame.Dialog(this);
         StartWithWindowsBox.IsChecked = UserSettings.StartWithWindows;
         NotificationsBox.IsChecked = user.Notifications;
         SourceInitialized += (_, _) => ThemeService.TitleBar(this);

@@ -148,6 +148,7 @@ public sealed class ConnectorSection : ObservableObject, ISettingsOwner
 {
     private readonly Dictionary<string, string> _settings;
     private string? _password;
+    private bool _foreignPassword;
     private string _newPassword = "";
     private bool _removePassword;
 
@@ -156,6 +157,7 @@ public sealed class ConnectorSection : ObservableObject, ISettingsOwner
         Kind = kind;
         _settings = new Dictionary<string, string>(defaults?.Settings ?? [], StringComparer.OrdinalIgnoreCase);
         _password = defaults?.Password;
+        _foreignPassword = _password is { Length: > 0 } password && !Secret.Readable(password);
         Fields = [.. kind.Fields.Where(f => f.Shared).Select(f => new SettingRow(this, f))];
     }
 
@@ -201,12 +203,14 @@ public sealed class ConnectorSection : ObservableObject, ISettingsOwner
     public string PasswordText =>
         _newPassword.Length > 0 ? "Encrypted when you save: only this gateway can read it."
         : _removePassword ? "The saved password goes when you save."
+        : _foreignPassword ? "The saved one was encrypted on another computer, so this gateway cannot read it. Type it again."
         : _password is { Length: > 0 } ? "One is saved. Type a new one to replace it."
         : $"None yet. Every {Kind.Title} facility without a password of its own uses this one.";
 
     public void Accept(string? password)
     {
         _password = password;
+        _foreignPassword = password is { Length: > 0 } && !Secret.Readable(password);
         _newPassword = "";
         _removePassword = false;
         Raise(nameof(NewPassword), nameof(PasswordText), nameof(CanRemovePassword));

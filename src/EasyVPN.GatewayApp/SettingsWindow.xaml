@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:EasyVPN"
-        Title="EasyVPN Gateway settings"
-        Style="{StaticResource AppWindowStyle}"
+        Title="Settings"
+        Style="{StaticResource DialogWindowStyle}"
         Icon="pack://application:,,,/Assets/easyvpn.ico"
         Width="720"
         Height="600"
@@ -14,49 +14,30 @@
     <Window.Resources>
         <app:VisibilityConverter x:Key="Visible" />
 
-        <Style x:Key="LabelStyle" TargetType="TextBlock">
-            <Setter Property="Margin" Value="0,14,0,4" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        </Style>
-        <Style x:Key="HintStyle" TargetType="TextBlock">
-            <Setter Property="Margin" Value="0,4,0,0" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
-            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-        </Style>
     </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
-            <StackPanel Margin="24,14">
-                <TextBlock Text="Settings" FontSize="{StaticResource FontSizeLarge}" FontWeight="SemiBold" />
-                <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}"
+        <ScrollViewer Style="{StaticResource AppScrollViewerStyle}">
+            <StackPanel Margin="24,18,24,24">
+                <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"
                            Text="What every facility of a kind shares, set here once. A facility's own setting, or its own password, wins over these." />
-            </StackPanel>
-        </Border>
-
-        <ScrollViewer Grid.Row="1" Style="{StaticResource AppScrollViewerStyle}">
-            <ItemsControl Margin="24,6,24,24" ItemsSource="{Binding Sections}" Focusable="False">
+            <ItemsControl ItemsSource="{Binding Sections}" Focusable="False">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,6" Text="{Binding Heading}" />
-                            <Border Style="{StaticResource CardBorderStyle}" Padding="16,12,16,14">
+                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Margin="0,20,0,6" Text="{Binding Heading}" />
+                            <Border Style="{StaticResource CardBorderStyle}" Padding="16,2,16,14">
                                 <StackPanel>
-                                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding Description}" />
-
                                     <ItemsControl ItemsSource="{Binding Fields}" Focusable="False">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel>
-                                                    <TextBlock Style="{StaticResource LabelStyle}" Text="{Binding Field.Label}" />
+                                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{Binding Field.Label}" />
                                                     <DockPanel>
                                                         <Button DockPanel.Dock="Right"
                                                                 Margin="8,0,0,0"
@@ -67,14 +48,14 @@
                                                                 Visibility="{Binding CanBrowse, Converter={StaticResource Visible}}" />
                                                         <TextBox Style="{StaticResource AppTextBoxStyle}" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
                                                     </DockPanel>
-                                                    <TextBlock Style="{StaticResource HintStyle}" Text="{Binding Field.SharedHint}" Visibility="{Binding Field.SharedHint, Converter={StaticResource Visible}}" />
+                                                    <TextBlock Style="{StaticResource HintTextStyle}" Text="{Binding Field.SharedHint}" Visibility="{Binding Field.SharedHint, Converter={StaticResource Visible}}" />
                                                 </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
 
                                     <StackPanel Visibility="{Binding Kind.SharesPassword, Converter={StaticResource Visible}}">
-                                        <TextBlock Style="{StaticResource LabelStyle}" Text="Password" />
+                                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Password" />
                                         <PasswordBox Style="{StaticResource AppPasswordBoxStyle}" PasswordChanged="OnPasswordChanged" />
                                         <DockPanel Margin="0,4,0,0">
                                             <Button DockPanel.Dock="Right"
@@ -82,7 +63,7 @@
                                                     Content="Remove it"
                                                     Click="OnRemovePasswordClick"
                                                     Visibility="{Binding CanRemovePassword, Converter={StaticResource Visible}}" />
-                                            <TextBlock Style="{StaticResource HintStyle}" Margin="0" VerticalAlignment="Center" Text="{Binding PasswordText}" />
+                                            <TextBlock Style="{StaticResource HintTextStyle}" Margin="0" VerticalAlignment="Center" Text="{Binding PasswordText}" />
                                         </DockPanel>
                                     </StackPanel>
                                 </StackPanel>
@@ -91,10 +72,11 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,1,0,0">
-            <DockPanel Margin="24,12">
+        <Border Grid.Row="1" Style="{StaticResource DialogFooterStyle}">
+            <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource SecondaryButtonStyle}" Content="Close" IsCancel="True" Click="OnCloseClick" />
                     <Button Margin="8,0,0,0" Style="{StaticResource PrimaryButtonStyle}" Content="Save" Command="{Binding SaveCommand}" />

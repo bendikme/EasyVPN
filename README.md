@@ -144,26 +144,33 @@ keys and facilities in `%ProgramData%\EasyVPN`.
 installed. Run `EasyVPN-Gateway-<version>-x64.msi` on it. It installs the `EasyVPN Gateway` service
 in `%ProgramFiles%\EasyVPN Gateway`, opens TCP 8420 (its API, and the tunnel on it) in the firewall, and
 installs the **EasyVPN Gateway app**, which opens when the installer finishes and then lives in the
-notification area of everyone who signs in to the gateway (and in the Start menu). It shows:
+notification area of everyone who signs in to the gateway (and in the Start menu). As the app on
+the workstations, it has a strip at the top with a search box and its buttons, and a status strip at
+the foot - the connection, the service, updates. Between them:
 
-- the connection the gateway carries, who asked for it, and its activity; a facility can be
-  connected from there too, to try it without a workstation;
-- what each workstation needs: the gateway's address, its access key (*Show the access key* asks
-  for administrator rights) and its certificate fingerprint, each a click from the clipboard;
-- every facility, and whether it is ready: its connector checks, without connecting anything, that
-  its VPN client is installed and its settings are in place (the profile file is there, the
-  Windows VPN connection exists, …). The gateway checks in the background and keeps the answers,
-  checking a facility again only when it or its connector changes, after a day, or on *Check*, so
-  the app shows them at once and the gateway is left alone; facilities that go through the same
-  VPN client are checked once for all of them (every Tosibox Lock goes through the one Tosi
-  Client);
-- what the gateway itself lacks: the firewall rule, Internet Connection Sharing (the *Internet
-  Connection Sharing (ICS)* service must not be disabled, nor sharing forbidden by group policy),
-  and for Layer 2 OpenVPN, the *EasyVPN L2* adapter and its bridge, each with a button that fixes
-  it or shows where to;
-- mistakes in `facilities.json`.
+- every facility, in a group for each customer that opens and closes - closed at first, and open
+  wherever a search finds something - with the one the gateway carries at the top: what it is
+  doing, who asked for it, and *Disconnect*. Under the mouse a facility shows *Edit*, and *Connect*
+  to try it without a workstation;
+- whether each facility is ready, said under one that is not, and on its group how many are not:
+  its connector checks, without
+  connecting anything, that its VPN client is installed and its settings are in place (the profile
+  file is there, the Windows VPN connection exists, …). The gateway checks in the background and
+  keeps the answers, checking a facility again only when it or its connector changes, after a day,
+  or on *Refresh*, so the app shows them at once and the gateway is left alone; facilities that go
+  through the same VPN client are checked once for all of them (every Tosibox Lock goes through the
+  one Tosi Client);
+- what the gateway itself lacks, in a banner at the top with a button that fixes it or shows where
+  to: the firewall rule, Internet Connection Sharing (the *Internet Connection Sharing (ICS)*
+  service must not be disabled, nor sharing forbidden by group policy), and for Layer 2 OpenVPN,
+  the *EasyVPN L2* adapter and its bridge - and mistakes in `facilities.json`;
+- its activity, at the foot, which folds away.
 
-*Edit facilities* (or *Edit* beside one) opens the **facility editor**, as administrator: add,
+*Workstations* shows what each of them needs: the gateway's address and certificate fingerprint,
+each a click from the clipboard, and its access key (*Show…* asks for administrator rights) - and
+how the gateway's own checks stand.
+
+*Facilities* (or *Edit* on one) opens the **facility editor**, as administrator: add,
 duplicate and remove facilities, choose each one's VPN client from the connectors and fill in what
 that one needs, browse for its profile file (copied into `%ProgramData%\EasyVPN\Gateway\vpn`, where
 only administrators can change it) and type its password (encrypted for this machine). An OpenVPN
@@ -172,11 +179,17 @@ OpenVPN 2.6 no longer takes is rewritten (`tls-remote` becomes `verify-x509-name
 added to `data-ciphers`; `comp-lzo` gets `allow-compression asym`), and old certificates tick
 *Allow old certificates*. It marks a
 facility with a mistake in red, and the gateway uses what is saved straight away. The facilities
-are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which *Open facilities.json* in the
-editor opens in Notepad; *Encrypt a password* in the app makes a `password` for writing it by hand.
+are kept in `%ProgramData%\EasyVPN\Gateway\facilities.json`, which the editor's *⋯* menu opens in
+Notepad, beside *Encrypt a password*, which makes a `password` for writing it there by hand.
 *Import…* adds the facilities in another file in the same form - another gateway's, or one made from
 Tosibox Monitor's list of Locks - leaving out those already there (the same id, or for Tosibox the
-same Lock), so importing a newer list adds only what is new; *Save* keeps them.
+same Lock), so importing a newer list adds only what is new; *Save* keeps them. *Export…* writes
+every facility in the editor to a file in the same form, for another gateway to import. Passwords
+are encrypted for this machine alone, so it asks whether to write them in clear or leave them out;
+*Import…* encrypts those in clear for its own machine when saved. A password encrypted on another
+gateway - facilities.json copied across - cannot be read here: the editor shows it as a problem
+until it is typed again.
+Profile files are not part of it: copy the `vpn` folder across too, or browse for them again.
 
 *Settings…*, at the top of the app, opens (as administrator) what the facilities of a kind share,
 set once rather than in each: for Tosibox, Tosi Client's program (`TosiboxKey.exe`) and its
@@ -211,13 +224,15 @@ and *Disconnect* - or the last one that could not be connected, and why, and abo
 the gateway could not be asked (to disconnect, say); your favourites, the
 facilities you used lately, and every facility by group. A click on a facility only chooses it: it
 connects with its *Connect* button, shown on the facility under the mouse and on the one chosen.
-Closed groups say how many they hold, so a hundred Tosibox Locks take a line; with more than 15
-facilities they start closed, and the app remembers which you open. Typing shows every facility
+Closed groups say how many they hold, so a hundred Tosibox Locks take a line; they start closed,
+and the app remembers which you open. Typing shows every facility
 whose name, customer, group, VPN client, networks or notes match, wherever it is. The keys are
 those of DynatecRDM's quick launch: ↑ ↓ (Page Up, Page Down) to choose, → ← to open and close a
 group, Enter to connect the one chosen, Delete to disconnect, Esc to close. Connecting another facility while the
 gateway carries one asks first, since it disconnects it for every workstation. The window (*Open
-EasyVPN*, or a right-click on the icon) has the same list, the facility's details and its activity.
+EasyVPN*, or a right-click on the icon) has the same list and the facility's details - with
+*Connect*, and the star that makes it a favourite - and, as the gateway app, the activity at the
+foot, which folds away, and a status strip: the connection, the gateway, updates.
 The icon shows the connection in its colour: amber and breathing while it connects, green with a
 tick when connected, red with an exclamation mark when it is interrupted or failed, grey when the
 agent or the gateway cannot be reached. A Windows notification says when a facility is connected,
@@ -289,7 +304,7 @@ has one of each kind.
 | `group` | Optional. The group the app lists it in, nested with `/`: `Tosibox/ACME`. |
 | `connector` | Which script in `connectors\` connects it. |
 | `settings` | Handed to the connector as `EASYVPN_<KEY>` environment variables. |
-| `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the gateway app (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
+| `password` | Handed to the connector as `EASYVPN_PASSWORD`. The facility editor encrypts what is typed there; by hand, make the encrypted form with *Encrypt a password* in the facility editor's *⋯* menu (or `EasyVPN.Gateway.exe protect`). Only this gateway can decrypt it. |
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway, which shares the adapter they lead to (its VPN's) with them. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
@@ -390,7 +405,7 @@ gateway's desktop writes the same.
 `FortiVPN.exe --cli`, which the connector runs as the gateway does every connector, needing nobody
 at the desktop. It connects only tunnels already made in FortiClient (or pushed by the customer's
 EMS), so make each in FortiClient on the gateway and give the facility its name exactly as
-FortiClient lists it; *Check* in the gateway app says whether FortiClient lists it. The gateway is
+FortiClient lists it; the gateway app says so under the facility when FortiClient does not. The gateway is
 FortiClient's only user: another tunnel it has up is disconnected first. An older FortiClient has
 no command line, so its facilities are `manual`; and FortiClient 7.4.4 and later have no IPsec with
 IKEv1, which leaves such a tunnel to `manual` with an older FortiClient. OpenConnect

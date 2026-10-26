@@ -16,6 +16,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        WindowFrame.Dialog(this);
         SourceInitialized += (_, _) => ThemeService.TitleBar(this);
         _model = new SettingsViewModel(question =>
             MessageBox.Show(this, question, Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK);

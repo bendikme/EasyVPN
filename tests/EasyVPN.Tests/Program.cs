@@ -144,6 +144,47 @@ try
         Equal("Keep me", saved.Notes);
         Equal("value", saved.Settings["custom"]);
     }));
+    await Check("A password encrypted on another computer says so", () =>
+    {
+        Equal("secret", Secret.Reveal(Secret.Protect("secret")));
+        var foreign = "dpapi:" + Convert.ToBase64String(new byte[64]);
+        Require(!Secret.Readable(foreign), "Foreign password readable");
+        try
+        {
+            Secret.Reveal(foreign);
+            Require(false, "Foreign password revealed");
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            Require(ex.Message.Contains("another computer"), ex.Message);
+        }
+    });
+    await CheckAsync("Editor shows a password encrypted on another computer as a problem", () => OnSta(() =>
+    {
+        var path = Path.Combine(GatewaySettings.Folder, "facilities.json");
+        DataDirectory.WriteJson(path, new FacilityFile([new Facility { Id = "copied", Name = "Copied", Routes = ["10.0.0.0/24"], Password = "dpapi:" + Convert.ToBase64String(new byte[64]) }]));
+        var draft = new FacilitiesViewModel("copied", _ => true).Facilities.Single();
+        Require(draft.Problem?.Contains("another computer") == true, draft.Problem ?? "No problem shown");
+        draft.NewPassword = "typed again";
+        Equal(null, draft.Problem);
+    }));
+    await CheckAsync("A password from another computer stops Connect but not Disconnect", async () =>
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(GatewaySettings.Folder, "connectors")).FullName;
+        File.WriteAllText(Path.Combine(folder, "copiedtest.ps1"), "param([string]$Action)\nexit 0");
+        var facility = new Facility { Id = "copied", Name = "Copied", Connector = "copiedtest", Password = "dpapi:" + Convert.ToBase64String(new byte[64]) };
+        var connectors = new Connectors(new RecentLog());
+        Equal(0, await connectors.RunAsync(facility, "Disconnect", CancellationToken.None));
+        try
+        {
+            await connectors.RunAsync(facility, "Connect", CancellationToken.None);
+            Require(false, "Connected with a password from another computer");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Require(ex.Message.Contains("another machine"), ex.Message);
+        }
+    });
     await Check("VPN route discovery filters uplinks and broadcasts", () =>
     {
         var before = new[] { Route("0.0.0.0", 0, 1) };

@@ -27,7 +27,6 @@ public sealed class MainViewModel : ObservableObject
     private bool _polling;
     private bool _updating;
     private DateTime _askedAt = DateTime.MinValue;
-    private bool _moreActivity;
     private ListRow? _selectedRow;
     private string? _activeId;
 
@@ -51,11 +50,6 @@ public sealed class MainViewModel : ObservableObject
             if (p is not GroupRow group) return;
             _user.SetOpen(group.Path, !group.IsOpen);
             Rebuild();
-        });
-        MoreActivityCommand = new RelayCommand(() =>
-        {
-            _moreActivity = !_moreActivity;
-            Raise(nameof(Log), nameof(MoreActivityText));
         });
         UpdateCommand = new AsyncRelayCommand(UpdateAsync);
 
@@ -82,9 +76,6 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>Opens or closes a group.</summary>
     public RelayCommand ToggleGroupCommand { get; }
-
-    /// <summary>The activity's last few lines, or more of them.</summary>
-    public RelayCommand MoreActivityCommand { get; }
 
     /// <summary>Installs the newer version found, or else looks for one.</summary>
     public AsyncRelayCommand UpdateCommand { get; }
@@ -158,14 +149,12 @@ public sealed class MainViewModel : ObservableObject
         foreach (var name in facility.GroupNames)
         {
             path = path.Length == 0 ? name : $"{path}/{name}";
-            if (!_user.IsOpen(path, OpenByDefault)) _user.SetOpen(path, true);
+            if (!_user.IsOpen(path, FacilityTree.OpenByDefault)) _user.SetOpen(path, true);
         }
         if (_favouritesOnly && !facility.IsFavourite) FavouritesOnly = false;
         Rebuild();
         Selected = facility;
     }
-
-    private bool OpenByDefault => Facilities.Count <= FacilityTree.OpenUpTo;
 
     /// <summary>The list again, after something outside it - the tray menu - opened or closed a group.</summary>
     public void RebuildList() => Rebuild();
@@ -179,7 +168,7 @@ public sealed class MainViewModel : ObservableObject
             rows,
             Facilities.Where(f => (!_favouritesOnly || f.IsFavourite) && f.Matches(query)),
             searching: query.Length > 0 || _favouritesOnly,
-            path => _user.IsOpen(path, OpenByDefault),
+            path => _user.IsOpen(path, FacilityTree.OpenByDefault),
             path => _groupRows.TryGetValue(path, out var row) ? row : _groupRows[path] = new GroupRow(path),
             facility => _facilityRows.TryGetValue(facility.Id, out var row) && row.Facility == facility ? row : _facilityRows[facility.Id] = new FacilityRow(facility),
             int.MaxValue,
@@ -220,20 +209,37 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _error, value);
     }
 
-    /// <summary>What this PC and the gateway did lately, newest first: the last few lines, or with <see cref="MoreActivityCommand"/> more.</summary>
-    public IReadOnlyList<ActivityLine> Log => [.. (_status?.Log ?? []).Reverse().Take(_moreActivity ? 30 : 3).Select(ActivityLine.Of)];
+    /// <summary>What this PC and the gateway did lately, newest first.</summary>
+    public IReadOnlyList<ActivityLine> Log => [.. (_status?.Log ?? []).Reverse().Take(50).Select(ActivityLine.Of)];
 
     public bool HasActivity => _status?.Log is { Count: > 0 };
 
-    public string MoreActivityText => _moreActivity ? "Show less" : "Show more";
+    /// <summary>The activity panel open, as this user left it.</summary>
+    public bool ShowActivity
+    {
+        get => _user.ShowActivity;
+        set
+        {
+            if (_user.ShowActivity == value) return;
+            _user.ShowActivity = value;
+            _user.Save();
+            OnPropertyChanged();
+        }
+    }
 
     // ---------------------------------------------------------------- the selected facility
 
     public bool HasSelection => _selected is not null;
+
+    /// <summary>The selected facility in the window, unless the agent is missing or no gateway is chosen.</summary>
+    public bool ShowFacility => HasSelection && _agentOnline && Configured;
     public bool SelectedIsActive => _selected is not null && _selected == Active;
     public ConnectionState SelectedState => SelectedIsActive ? State : ConnectionState.Disconnected;
     public bool CanConnect => _selected is not null && !(SelectedIsActive && IsBusy);
     public bool CanDisconnect => SelectedIsActive && IsBusy;
+
+    /// <summary>The state beside its name: only while it is the one connected, or failed.</summary>
+    public bool ShowSelectedState => SelectedState != ConnectionState.Disconnected;
 
     public string SelectedStateText => SelectedState switch
     {
@@ -252,16 +258,35 @@ public sealed class MainViewModel : ObservableObject
         : IsBusy && Active is { } active ? $"Connecting here ends the connection to {active.Name}."
         : null;
 
-    // ---------------------------------------------------------------- footer and tray
+    // ---------------------------------------------------------------- status strip and tray
+
+    /// <summary>The connection, in a few words, for the status strip: as the gateway app's.</summary>
+    public string ConnectionText => !_agentOnline ? "Not connected" : State switch
+    {
+        ConnectionState.Connecting => $"Connecting to {ActiveName}",
+        ConnectionState.Connected => $"Connected to {ActiveName}",
+        ConnectionState.Interrupted => $"{ActiveName} interrupted",
+        ConnectionState.Disconnecting => $"Disconnecting {ActiveName}",
+        ConnectionState.Failed => $"Could not connect to {ActiveName}",
+        _ => "No facility connected",
+    };
+
+    private string ActiveName => Active?.Name ?? _status?.FacilityId ?? "the facility";
 
     public string GatewayText =>
         !_agentOnline ? "The EasyVPN Agent service is not running on this PC"
         : !Configured ? "No gateway chosen"
-        : $"Gateway {_settings?.Gateway} · {(_status!.GatewayOnline ? "online" : "not answering")}";
+        : $"Gateway {_settings?.Gateway} {(_status!.GatewayOnline ? "online" : "not answering")}";
 
     public bool GatewayOnline => _status?.GatewayOnline ?? false;
 
-    public string TunnelText => _status?.TunnelUp == true ? "Tunnel up" : "Tunnel down";
+    /// <summary>The gateway's dot: fine, not chosen yet, or not to be reached.</summary>
+    public CheckLevel GatewayLevel => !_agentOnline ? CheckLevel.Problem : !Configured ? CheckLevel.Warning : GatewayOnline ? CheckLevel.Ok : CheckLevel.Problem;
+
+    /// <summary>Said only when it matters: connected, and the tunnel to the gateway down.</summary>
+    public string? TunnelWarning => State is ConnectionState.Connected or ConnectionState.Interrupted && _status?.TunnelUp != true
+        ? "Tunnel to the gateway down"
+        : null;
 
     // ---------------------------------------------------------------- updates
 
@@ -281,6 +306,11 @@ public sealed class MainViewModel : ObservableObject
         { State: UpdateState.UpToDate } u => $"Version {u.Current}, up to date",
         var u => u.Message ?? $"Version {u.Current}",
     };
+
+    public string VersionText => Update is { } u ? $"Version {u.Current}" : "";
+
+    /// <summary>The update, in the status strip, when there is something to say: nothing when up to date.</summary>
+    public string UpdateNote => Update?.State == UpdateState.UpToDate ? "" : UpdateText;
 
     public string UpdateButtonText => CanInstallUpdate ? $"Install {Update!.Latest}" : "Check for updates";
 

@@ -59,6 +59,16 @@ public partial class FacilitiesWindow : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
+    private void OnMoreClick(object sender, RoutedEventArgs e)
+    {
+        var button = (FrameworkElement)sender;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        button.ContextMenu.IsOpen = true;
+    }
+
+    private void OnEncryptPasswordClick(object sender, RoutedEventArgs e) => new PasswordWindow { Owner = this }.ShowDialog();
+
     // ---------------------------------------------------------------- the window's own title strip
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);

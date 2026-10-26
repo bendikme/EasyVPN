@@ -12,6 +12,7 @@ public partial class PasswordWindow : Window
     public PasswordWindow()
     {
         InitializeComponent();
+        WindowFrame.Dialog(this);
         SourceInitialized += (_, _) => ThemeService.TitleBar(this);
         Loaded += (_, _) => FirstBox.Focus();
     }

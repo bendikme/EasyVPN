@@ -5,36 +5,10 @@
 
     <!-- What the window's list and the tray menu share: a group, which opens and closes, and the
          lines that are not rows (titles, messages). Their facility rows are each their own. The
-         list's view model has a ToggleGroupCommand. -->
+         list's view model has a ToggleGroupCommand. A group's button and chevron are the themes',
+         which the gateway app's groups use too. -->
 
     <local:VisibilityConverter x:Key="RowVisible" />
-
-    <PathGeometry x:Key="GeoChevron" po:Freeze="True" Figures="M9.5,6 L15.5,12 L9.5,18" />
-
-    <!-- A group: the whole row is its button, so a click opens or closes it, and never selects it. -->
-    <Style x:Key="GroupRowButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="Padding" Value="6,6,8,6" />
-        <Setter Property="Focusable" Value="False" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusSmall}" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter />
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
 
     <DataTemplate DataType="{x:Type local:GroupRow}">
         <Button Margin="{Binding Indent}"

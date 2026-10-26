@@ -130,12 +130,14 @@ public sealed class TrayMenuViewModel : ObservableObject
         set => SetProperty(ref _selected, value is null or { IsSelectable: true } ? value : _selected);
     }
 
-    /// <summary>The connection in a few words, beside the name at the top.</summary>
+    /// <summary>
+    /// Beside the name at the top, what keeps any facility from connecting; nothing otherwise, as
+    /// the connection has its own row.
+    /// </summary>
     public string Summary => !_main.AgentOnline ? "Agent not running"
         : !_main.Configured ? "No gateway chosen"
         : !_main.GatewayOnline ? "Gateway not answering"
-        : _main.Active is { } active && _main.State != ConnectionState.Disconnected ? $"{StateWord(_main.State)}: {active.Name}"
-        : "Not connected";
+        : "";
 
     /// <summary>How the summary is coloured: Ok while connected, Problem when the gateway cannot be reached or a connect failed.</summary>
     public CheckLevel? SummaryLevel => !_main.AgentOnline || !_main.Configured || !_main.GatewayOnline || _main.State == ConnectionState.Failed ? CheckLevel.Problem
@@ -346,8 +348,7 @@ public sealed class TrayMenuViewModel : ObservableObject
             if (facilities.Count > 0)
             {
                 rows.Add(_all);
-                var openByDefault = facilities.Count <= FacilityTree.OpenUpTo;
-                FacilityTree.Append(rows, facilities, searching: false, path => _main.User.IsOpen(path, openByDefault), Group, f => Row("all", f), int.MaxValue, out _);
+                FacilityTree.Append(rows, facilities, searching: false, path => _main.User.IsOpen(path, FacilityTree.OpenByDefault), Group, f => Row("all", f), int.MaxValue, out _);
             }
             else
             {

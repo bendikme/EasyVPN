@@ -17,7 +17,7 @@ public sealed class UserSettings
     /// <summary>The facilities this user connected lately, by id, the latest first.</summary>
     public List<string> Recent { get; set; } = [];
 
-    /// <summary>Groups this user opened or closed, by path. One never touched follows <see cref="FacilityTree.OpenUpTo"/>.</summary>
+    /// <summary>Groups this user opened or closed, by path. One never touched is closed (<see cref="FacilityTree.OpenByDefault"/>).</summary>
     public Dictionary<string, bool> Groups { get; set; } = [];
 
     /// <summary>Windows notifications when the connection changes: connected, interrupted, failed, disconnected by someone else.</summary>
@@ -25,6 +25,9 @@ public sealed class UserSettings
 
     /// <summary>The shortcut that opens the tray menu from anywhere, as DynatecRDM's Ctrl+Alt+R does. Empty for none.</summary>
     public string Hotkey { get; set; } = "Ctrl+Alt+F";
+
+    /// <summary>The window's activity panel open, rather than folded away.</summary>
+    public bool ShowActivity { get; set; }
 
     private const int RecentKept = 8;
 

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -59,6 +60,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         BrowseCommand = new RelayCommand(p => Browse((SettingRow)p!));
         OpenFileCommand = new RelayCommand(() => Process.Start("notepad.exe", $"\"{_path}\"")?.Dispose());
         ImportCommand = new RelayCommand(Import, () => _canEdit);
+        ExportCommand = new RelayCommand(Export, () => _canEdit);
 
         Load(select);
     }
@@ -77,6 +79,7 @@ public sealed class FacilitiesViewModel : ObservableObject
     public RelayCommand BrowseCommand { get; }
     public RelayCommand OpenFileCommand { get; }
     public RelayCommand ImportCommand { get; }
+    public RelayCommand ExportCommand { get; }
 
     public string FilePath => _path;
 
@@ -153,7 +156,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         Validate();
         Selected = Facilities.FirstOrDefault(f => string.Equals(f.Id, select, StringComparison.OrdinalIgnoreCase))
             ?? View.Cast<FacilityDraft>().FirstOrDefault();
-        foreach (var command in new[] { AddCommand, DuplicateCommand, RemoveCommand, SaveCommand, ImportCommand }) command.RaiseCanExecuteChanged();
+        foreach (var command in new[] { AddCommand, DuplicateCommand, RemoveCommand, SaveCommand, ImportCommand, ExportCommand }) command.RaiseCanExecuteChanged();
         Raise(nameof(CountText));
     }
 
@@ -195,7 +198,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         try
         {
             var facilities = Facilities.Select(f => (Draft: f, Facility: f.ToFacility(protect: true))).ToList();
-            Write(new FacilityFile([.. facilities.Select(f => f.Facility)]));
+            Write(new FacilityFile([.. facilities.Select(f => f.Facility)]), _path);
             foreach (var (draft, facility) in facilities) draft.Accept(facility.Password);
             _stamp = File.GetLastWriteTimeUtc(_path);
             _saved = Serialize(protect: false);
@@ -211,7 +214,7 @@ public sealed class FacilitiesViewModel : ObservableObject
     }
 
     /// <summary>Writes beside the file and swaps it in, leaving out what is empty or the default, so the file stays short.</summary>
-    private void Write(FacilityFile file)
+    private static void Write(FacilityFile file, string path)
     {
         var json = JsonSerializer.SerializeToNode(file, FileJson)!;
         foreach (var facility in json["facilities"]!.AsArray().OfType<JsonObject>())
@@ -221,9 +224,9 @@ public sealed class FacilitiesViewModel : ObservableObject
             if (facility["layer2"]?.GetValue<bool>() == false) facility.Remove("layer2");
             if (facility["timeout"]?.GetValue<int>() == Facility.DefaultTimeout) facility.Remove("timeout");
         }
-        var temp = _path + ".tmp";
+        var temp = path + ".tmp";
         File.WriteAllText(temp, json.ToJsonString(FileJson));
-        File.Move(temp, _path, overwrite: true);
+        File.Move(temp, path, overwrite: true);
     }
 
     private string Serialize(bool protect) =>
@@ -266,7 +269,8 @@ public sealed class FacilitiesViewModel : ObservableObject
     /// The facilities in another file, in facilities.json's form - from another gateway, or made from
     /// Tosibox Monitor's list of Locks - added to these. One already here (the same id, or for
     /// Tosibox the same Lock) is left as it is, so importing a newer list again adds only what is
-    /// new. Nothing is written until Save.
+    /// new. Nothing is written until Save. A password in clear (from Export) is encrypted for this
+    /// machine when saved; one encrypted on another machine is no use here, and is shown as a problem.
     /// </summary>
     private void Import()
     {
@@ -290,7 +294,10 @@ public sealed class FacilitiesViewModel : ObservableObject
         foreach (var facility in imported)
         {
             if (Facilities.Any(f => SameAs(f, facility))) continue;
+            var clear = facility.Password is { Length: > 0 } password && !Secret.IsProtected(password) ? password : null;
+            if (clear is not null) facility.Password = null;
             var draft = new FacilityDraft(facility, KindOf(facility.Connector)) { AutoId = string.IsNullOrWhiteSpace(facility.Id) };
+            if (clear is not null) draft.NewPassword = clear;
             Track(draft);
             added.Add(draft);
         }
@@ -298,14 +305,70 @@ public sealed class FacilitiesViewModel : ObservableObject
         if (added.Count > 0) Selected = added.OrderBy(d => d.Customer).ThenBy(d => d.Title).First();
         Error = null;
         var kept = imported.Count - added.Count;
+        var foreign = added.Count(d => d.ForeignPassword);
         Status = (added.Count, kept) switch
         {
             (0, 0) => $"{name} has no facilities.",
             (0, _) => $"Every facility in {name} is here already.",
-            _ => $"{Count(added.Count)} added from {name}{(kept > 0 ? $"; {Count(kept)} already here left as they are" : "")}. Save to keep them.",
+            _ => $"{Count(added.Count)} added from {name}{(kept > 0 ? $"; {Count(kept)} already here left as they are" : "")}. Save to keep them."
+                + (foreign == 0 ? "" : foreign == 1
+                    ? " One has a password encrypted on another computer: type it again."
+                    : $" {foreign} have passwords encrypted on another computer: type them again."),
         };
 
         static string Count(int n) => n == 1 ? "1 facility" : $"{n} facilities";
+    }
+
+    /// <summary>
+    /// Every facility here, as the editor holds them (saved or not), written to another file in
+    /// facilities.json's form, for another gateway's Import. A password is encrypted for this
+    /// machine alone, so it goes in clear or not at all, as the person says.
+    /// </summary>
+    private void Export()
+    {
+        if (Facilities.Count == 0)
+        {
+            Status = "There are no facilities to export.";
+            return;
+        }
+        var dialog = new SaveFileDialog { Filter = "Facilities (*.json)|*.json|All files (*.*)|*.*", FileName = "facilities.json", AddExtension = true };
+        if (dialog.ShowDialog() != true) return;
+        var name = Path.GetFileName(dialog.FileName);
+
+        var facilities = Facilities.Select(f => f.ToFacility(protect: true)).OrderBy(f => f.Customer).ThenBy(f => f.Name).ToList();
+        var withPassword = facilities.Where(f => f.Password is { Length: > 0 }).ToList();
+        var reveal = withPassword.Count > 0 && _ask(withPassword.Count == 1
+            ? "One facility has a password, encrypted so that only this gateway can read it. Write it in the file in clear, so another gateway can use it? Anyone with the file can then read it."
+            : $"{withPassword.Count} facilities have passwords, encrypted so that only this gateway can read them. Write them in the file in clear, so another gateway can use them? Anyone with the file can then read them.");
+        var lost = 0;
+        foreach (var facility in withPassword)
+        {
+            try
+            {
+                facility.Password = reveal ? Secret.Reveal(facility.Password!) : null;
+            }
+            catch (CryptographicException)
+            {
+                // Encrypted on another machine: no use here or anywhere else.
+                facility.Password = null;
+                lost++;
+            }
+        }
+
+        try
+        {
+            Write(new FacilityFile(facilities), dialog.FileName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Error = $"{name} could not be written: {ex.Message}";
+            return;
+        }
+        Error = null;
+        var count = facilities.Count == 1 ? "1 facility" : $"{facilities.Count} facilities";
+        Status = $"{count} exported to {name}"
+            + (withPassword.Count == 0 ? "." : reveal ? ", with passwords in clear: keep the file safe." : ", without passwords.")
+            + (lost > 0 ? $" {lost} password{(lost == 1 ? " was" : "s were")} encrypted on another machine and left out." : "");
     }
 
     /// <summary>The same facility: the same id, or a Tosibox one for the same Lock.</summary>
@@ -464,6 +527,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
     private ConnectorKind _kind;
     private readonly Dictionary<string, string> _settings;
     private string? _password;
+    private bool _foreignPassword;
     private string _newPassword = "";
     private bool _removePassword;
     private bool _layer2;
@@ -486,6 +550,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
         _kind = kind;
         _settings = new Dictionary<string, string>(facility.Settings, StringComparer.OrdinalIgnoreCase);
         _password = facility.Password;
+        _foreignPassword = facility.Password is { Length: > 0 } password && !Secret.Readable(password);
         _layer2 = facility.Layer2;
         _routes = string.Join(Environment.NewLine, facility.Routes);
         _dnsDomains = string.Join(", ", facility.Dns?.Domains ?? []);
@@ -602,6 +667,9 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
 
     public bool CanRemovePassword => _password is { Length: > 0 } && !_removePassword && _newPassword.Length == 0;
 
+    /// <summary>The saved password, still kept, was encrypted on another computer (facilities.json copied from another gateway).</summary>
+    public bool ForeignPassword => _foreignPassword && !_removePassword && _newPassword.Length == 0;
+
     public void RemovePassword()
     {
         _newPassword = "";
@@ -612,6 +680,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
     public string PasswordText =>
         _newPassword.Length > 0 ? "Encrypted when you save: only this gateway can read it."
         : _removePassword ? "The saved password goes when you save."
+        : ForeignPassword ? "The saved one was encrypted on another computer, so this gateway cannot read it. Type it again."
         : _password is { Length: > 0 } ? "One is saved. Type a new one to replace it."
         : _kind.SharesPassword ? "None here: the one in Settings is used. One typed here is for this facility alone."
         : "Encrypted when you save: only this gateway can read it.";
@@ -620,6 +689,7 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
     public void Accept(string? password)
     {
         _password = password;
+        _foreignPassword = password is { Length: > 0 } && !Secret.Readable(password);
         _newPassword = "";
         _removePassword = false;
         Raise(nameof(NewPassword), nameof(PasswordText), nameof(CanRemovePassword));
@@ -710,6 +780,8 @@ public sealed class FacilityDraft : ObservableObject, ISettingsOwner
             return "has a timeout that is not a number of seconds";
         if (LinkLines().FirstOrDefault(l => !Uri.TryCreate(ParseLink(l).Url, UriKind.Absolute, out _)) is { } link)
             return $"has a link without an address such as https://… or rdp://…: {link}";
+        if (ForeignPassword)
+            return "has a password encrypted on another computer, which this gateway cannot read: type it again";
         return ToFacility(protect: false).Problem();
     }
 

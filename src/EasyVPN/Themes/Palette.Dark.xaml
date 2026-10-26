@@ -35,6 +35,8 @@
 
     <Color x:Key="BorderSoftColor">#FF2C313A</Color>
     <Color x:Key="BorderStrongColor">#FF6B7482</Color>
+    <!-- Buttons' edges: a button reads by its fill and label, so its edge stays light. -->
+    <Color x:Key="BorderControlColor">#FF3D434E</Color>
 
     <Color x:Key="TextPrimaryColor">#FFEDEFF3</Color>
     <Color x:Key="TextSecondaryColor">#FFB6BDC9</Color>
@@ -56,6 +58,7 @@
     <Color x:Key="WarningColor">#FFF5B040</Color>
     <Color x:Key="DangerColor">#FFFF8080</Color>
     <Color x:Key="DangerSubtleColor">#FF3F2429</Color>
+    <Color x:Key="WarningSubtleColor">#FF3A3021</Color>
     <!-- The danger button needs a deeper red than danger text: the light red that reads on
          a dark surface cannot also carry white text. -->
     <Color x:Key="DangerFillColor">#FFD13A3A</Color>
@@ -71,6 +74,7 @@
 
     <SolidColorBrush x:Key="BorderBrushSoft" Color="{StaticResource BorderSoftColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="BorderBrushStrong" Color="{StaticResource BorderStrongColor}" po:Freeze="True" />
+    <SolidColorBrush x:Key="BorderBrushControl" Color="{StaticResource BorderControlColor}" po:Freeze="True" />
 
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}" po:Freeze="True" />
@@ -89,6 +93,7 @@
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="DangerSubtleBrush" Color="{StaticResource DangerSubtleColor}" po:Freeze="True" />
+    <SolidColorBrush x:Key="WarningSubtleBrush" Color="{StaticResource WarningSubtleColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="DangerFillBrush" Color="{StaticResource DangerFillColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="DangerFillHoverBrush" Color="{StaticResource DangerFillHoverColor}" po:Freeze="True" />
     <SolidColorBrush x:Key="OnDangerBrush" Color="{StaticResource OnDangerColor}" po:Freeze="True" />
