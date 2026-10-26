@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace EasyVPN.Gateway;
@@ -7,7 +8,15 @@ namespace EasyVPN.Gateway;
 /// <c>facilities.json</c>: the gateway reads it, and the gateway app's facility editor writes it,
 /// both through these types.
 /// </summary>
-public sealed record FacilityFile(List<Facility> Facilities);
+public sealed record FacilityFile(List<Facility> Facilities)
+{
+    // The editor must not silently replace malformed entries with defaults when saving.
+    internal void ValidateStructure()
+    {
+        if (Facilities is null || Facilities.Any(f => f is null || f.HasNullFields))
+            throw new JsonException("Facilities and their required fields cannot be null. Use an empty list [] or an empty string instead.");
+    }
+}
 
 /// <summary>A facility as the gateway knows it: what clients see, plus how to connect to it.</summary>
 public sealed partial class Facility
@@ -59,10 +68,19 @@ public sealed partial class Facility
 
     public FacilityInfo ToInfo() => new(Id, Name, Customer, Connector, Routes, Dns, Check, Notes, Links, Layer2, Group);
 
+    internal bool HasNullFields => Id is null || Name is null || Customer is null || Connector is null
+        || Settings is null || Routes is null || Links is null
+        || Settings.Any(s => s.Value is null) || Routes.Any(r => r is null)
+        || Links.Any(l => l is null || l.Name is null || l.Url is null)
+        || Dns is { Domains: null } or { Servers: null }
+        || Dns is { } dns && (dns.Domains.Any(d => d is null) || dns.Servers.Any(s => s is null));
+
     /// <summary>What keeps the gateway from using it, worded to follow its name ("… has no routes"); null when nothing does.</summary>
     public string? Problem() => this switch
     {
-        _ when !IdPattern().IsMatch(Id) => "needs an id of letters, digits, '.', '-' and '_'",
+        _ when Id is null || !IdPattern().IsMatch(Id) || Id.EndsWith('.') || ReservedName().IsMatch(Id) =>
+            "needs an id of letters, digits, '.', '-' and '_' that does not end with '.' or name a reserved Windows device",
+        _ when HasNullFields => "has a null field where a value or list is needed",
         _ when Routes.FirstOrDefault(r => !IPNetwork.TryParse(r, out _)) is { } route =>
             $"has a route that is not a network in CIDR form: {route}",
         { Check: { } check } when !Probe.TrySplit(check, out _, out _) => $"has a check that is not host:port: {check}",
@@ -70,6 +88,9 @@ public sealed partial class Facility
     };
 
     // The id also names the connector's work folder, so it must be a plain file name.
-    [GeneratedRegex("^[A-Za-z0-9._-]+$")]
+    [GeneratedRegex(@"\A[A-Za-z0-9._-]+\z")]
     private static partial Regex IdPattern();
+
+    [GeneratedRegex(@"\A(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|\z)", RegexOptions.IgnoreCase)]
+    private static partial Regex ReservedName();
 }

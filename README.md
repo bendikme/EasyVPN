@@ -86,9 +86,17 @@ and the vendor clients run untouched, as they were designed to.
 
 ```powershell
 dotnet build EasyVPN.slnx              # development
+dotnet run --project tests/EasyVPN.Tests  # isolated regression checks (no administrator rights)
 .\build\publish.ps1                    # artifacts\Gateway and artifacts\Client, with the install scripts
 .\build\release.ps1 -Version 1.2.3     # the two installers, as a GitHub release has them
 ```
+
+The regression checks use temporary settings and cover profile import, facility validation and
+editing, route selection, disconnect cleanup, and the PowerShell helper. Add `-- --services` to
+also start a disposable gateway and check its API guards, certificate pinning and connection
+lifecycle. That check needs local port 8428 free and replaces sharing and VPN connectors with
+stand-ins; it does not change adapters, routes, DNS or Internet Connection Sharing. Real VPN
+clients and packet forwarding still need testing on a configured gateway and workstation.
 
 Everything is self-contained (no .NET needed on the machines). `publish.ps1` downloads gost 3.3.1
 and Wintun 0.14.1 and checks them against pinned SHA-256 hashes. `release.ps1` packages its two

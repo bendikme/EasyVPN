@@ -194,6 +194,11 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         Outcome outcome;
         lock (_sync) (settings, wanted, outcome) = (_settings, _wanted, _outcome);
 
+        // Local cleanup must not depend on reaching the gateway: disconnecting or switching
+        // facilities still removes the previous routes/link when the gateway is offline.
+        if (_carried is not null && !string.Equals(_carried.Id, wanted, StringComparison.OrdinalIgnoreCase))
+            await ReleaseAsync();
+
         if (!settings.IsConfigured)
         {
             await ReleaseAsync();
@@ -233,10 +238,6 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
             Publish(outcome.State, outcome.FacilityId, outcome.Message ?? (busy ? $"The gateway is in use by {gateway.Client}" : null));
             return;
         }
-
-        // Switched to another facility: the previous one goes now, not once the new one is up.
-        if (_carried is not null && !string.Equals(_carried.Id, wanted, StringComparison.OrdinalIgnoreCase))
-            await ReleaseAsync();
 
         if (!string.Equals(gateway.FacilityId, wanted, StringComparison.OrdinalIgnoreCase))
         {
@@ -382,9 +383,9 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
     private async Task ReleaseAsync()
     {
         if (_carried is not { } facility) return;
-        _carried = null;
         if (facility.Layer2) await layer2.StopAsync();
         else await tunnel.ClearAsync();
+        _carried = null;
     }
 
     private void Publish(ConnectionState state, string? facilityId, string? message, bool configured = true, bool online = true)

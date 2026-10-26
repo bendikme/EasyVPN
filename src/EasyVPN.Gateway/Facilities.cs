@@ -64,8 +64,14 @@ public sealed class FacilityCatalog
     public Facility? Find(string id) =>
         All().FirstOrDefault(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase));
 
-    private bool IsValid(Facility facility)
+    private bool IsValid(Facility? facility)
     {
+        if (facility is null)
+        {
+            _problems.Add("facilities.json has a null facility, so it is left out");
+            _log.Add(_problems[^1]);
+            return false;
+        }
         if (facility.Problem() is not { } problem) return true;
         _problems.Add($"Facility '{facility.Name}' ({facility.Id}) {problem}, so it is left out");
         _log.Add(_problems[^1]);

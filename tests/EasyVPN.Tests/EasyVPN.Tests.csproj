@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EasyVPN.Agent\EasyVPN.Agent.csproj" />
+    <ProjectReference Include="..\..\src\EasyVPN.Gateway\EasyVPN.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\EasyVPN.GatewayApp\EasyVPN.GatewayApp.csproj" Aliases="GatewayAppAssembly" />
+  </ItemGroup>
+</Project>

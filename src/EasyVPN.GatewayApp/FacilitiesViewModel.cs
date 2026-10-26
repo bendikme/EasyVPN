@@ -135,6 +135,7 @@ public sealed class FacilitiesViewModel : ObservableObject
         {
             _stamp = File.GetLastWriteTimeUtc(_path);
             var file = DataDirectory.ReadJson<FacilityFile>(_path);
+            file?.ValidateStructure();
             foreach (var facility in file?.Facilities ?? []) Track(new FacilityDraft(facility, KindOf(facility.Connector)));
             _saved = Serialize(protect: false);
             _canEdit = true;
@@ -275,7 +276,9 @@ public sealed class FacilitiesViewModel : ObservableObject
         List<Facility> imported;
         try
         {
-            imported = JsonSerializer.Deserialize<FacilityFile>(File.ReadAllText(dialog.FileName), Defaults.Json)?.Facilities ?? [];
+            var file = JsonSerializer.Deserialize<FacilityFile>(File.ReadAllText(dialog.FileName), Defaults.Json);
+            file?.ValidateStructure();
+            imported = file?.Facilities ?? [];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
