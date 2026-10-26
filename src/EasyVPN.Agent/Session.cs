@@ -145,7 +145,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
-        GostProcess.KillStrays();
+        LegacyGost.KillStrays();
         try
         {
             // DNS rules outlive the agent; the routes went with the old adapter.
@@ -229,7 +229,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
             Publish(ConnectionState.Disconnected, wanted, "The gateway runs an older EasyVPN than this PC. It updates itself while nothing is connected.");
             return;
         }
-        tunnel.Start(settings, gateway.RelayPort, lease);
+        tunnel.Start(Gateway(), lease);
 
         if (wanted is null)
         {
@@ -314,7 +314,7 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         }
 
         Publish(ConnectionState.Connecting, id, "Checking the connection from this PC");
-        var problem = await VerifyAsync(settings, facility, gateway.RelayPort, ct);
+        var problem = await VerifyAsync(facility, ct);
         if (problem is not null)
         {
             await EndAsync(ConnectionState.Failed, id, problem);
@@ -357,11 +357,14 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
     }
 
     /// <summary>Is the facility reachable from this PC? The relay first, then the facility through it.</summary>
-    private static async Task<string?> VerifyAsync(AgentSettings settings, FacilityInfo facility, int relayPort, CancellationToken ct)
+    private async Task<string?> VerifyAsync(FacilityInfo facility, CancellationToken ct)
     {
-        var relay = $"{settings.Host}:{relayPort}";
-        if (!await Probe.TcpAsync(relay, ct))
-            return $"The gateway's relay ({relay}) does not answer. Open TCP {relayPort} in the gateway's firewall, and check that its VPN client allows access to the local network.";
+        // The tunnel links up within moments of the gateway answering; a little longer after a drop.
+        for (var i = 0; !tunnel.IsUp && i < 40; i++) await Task.Delay(250, ct);
+        if (!tunnel.IsUp)
+            return tunnel.Problem is { } why
+                ? $"The tunnel to the gateway is not up. {why}"
+                : "The tunnel to the gateway is not up. Check that the gateway's VPN client allows access to the local network.";
         if (facility.Check is { } check && !await Probe.TcpAsync(check, ct, timeoutMs: 5000))
             return $"{check} answers the gateway but not this PC. The activity log shows what the tunnel reported.";
         return null;

@@ -2,7 +2,7 @@
     Sends one facility's traffic into the EasyVPN adapter, or stops doing so. The agent runs it as
     SYSTEM:  network.ps1 Apply | Clear | Prepare
 
-    Prepare is for a new adapter, each time gost makes one: NetBIOS off, so Windows' name
+    Prepare is for a new adapter, each time the agent makes one: NetBIOS off, so Windows' name
     broadcasts do not try to go through the tunnel; the adapter called Dynatec EasyVPN where it
     is listed by its driver or device (TIA Portal, Device Manager); and the network Windows sees on
     it named EasyVPN, the ones it remembered for earlier adapters gone.
@@ -25,7 +25,7 @@ $tag = 'EasyVPN'
 function Split-List($value) { @("$value" -split ',' | Where-Object { $_ }) }
 
 if ($Action -eq 'Prepare') {
-    # gost has only just started; the adapter, and its IP settings, follow in a moment.
+    # The adapter has only just been made; its IP settings follow in a moment.
     for ($i = 0; ; $i++) {
         $nic = Get-NetAdapter -Name $adapter -ErrorAction SilentlyContinue
         $config = if ($nic) { Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "InterfaceIndex=$($nic.ifIndex)" }
@@ -38,7 +38,7 @@ if ($Action -eq 'Prepare') {
     if ($result.ReturnValue -gt 1) { throw "Windows answered $($result.ReturnValue)." }
 
     # TIA Portal lists the adapter by its driver's description - Wintun's own, "Wintun Userspace
-    # Tunnel" - and Device Manager by its device's name, "GOST Tunnel". Both say EasyVPN instead,
+    # Tunnel" - and Device Manager by its device's name ("GOST Tunnel" up to 0.4). Both say EasyVPN instead,
     # set again each time, as the adapter is made afresh with Wintun's.
     $title = 'Dynatec EasyVPN'
     $class = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}'
@@ -81,7 +81,7 @@ foreach ($prefix in Split-List $env:EASYVPN_OLD_ROUTES) {
 Get-DnsClientNrptRule | Where-Object Comment -eq $tag | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force }
 
 if ($Action -eq 'Apply') {
-    # gost creates the adapter as it starts; it may only just have started.
+    # The agent makes the adapter as it starts; it may only just have started.
     for ($i = 0; -not (Get-NetAdapter -Name $adapter -ErrorAction SilentlyContinue); $i++) {
         if ($i -ge 40) { throw "There is no $adapter adapter. Is the tunnel running?" }
         Start-Sleep -Milliseconds 250

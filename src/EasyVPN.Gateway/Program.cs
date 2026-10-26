@@ -34,7 +34,7 @@ switch (args)
 
 var settings = GatewaySettings.LoadOrCreate();
 var certificate = GatewayCertificate.LoadOrCreate();
-GostProcess.KillStrays();
+LegacyGost.KillStrays();
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService(o => o.ServiceName = "EasyVPN.Gateway");
@@ -92,12 +92,14 @@ app.Use((context, next) =>
     return Task.CompletedTask;
 });
 
-// Layer 2 links ride on WebSockets. Pings find a workstation that vanished, so a stale link
-// cannot hold the adapter.
+// The tunnel and Layer 2 links ride on WebSockets. Pings find a workstation that vanished, so a
+// stale link cannot hold its address, or the adapter.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15), KeepAliveTimeout = TimeSpan.FromSeconds(30) });
 
 var api = app.MapGroup("/api");
 api.Map("/layer2", (HttpContext context, Layer2Port port) => port.RunAsync(context, ClientOf(context.Request)));
+// The tunnel: the workstation's IP packets, at its address on the tunnel.
+api.Map("/tunnel/link", (HttpContext context, Hub hub, TunnelAddresses addresses) => hub.RunLinkAsync(context, addresses.For(ClientOf(context.Request))));
 api.MapGet("/facilities", (FacilityCatalog catalog) => catalog.All().Select(f => f.ToInfo()));
 api.MapGet("/status", (ConnectionController controller) => controller.Status);
 // The workstation's address on the tunnel: the same each time.
@@ -178,8 +180,8 @@ static void PrintInfo()
           {certificate.Thumbprint}
 
         Facilities are defined in {Path.Combine(GatewaySettings.Folder, "facilities.json")}
-        Clients also need TCP {settings.ApiPort} and {settings.RelayPort} open to this machine. They reach a
-        connected facility through Windows' Internet Connection Sharing, which shares its VPN with them.
+        Clients need TCP {settings.ApiPort} open to this machine, for the API and the tunnel. They reach
+        a connected facility through Windows' Internet Connection Sharing, which shares its VPN with them.
         The EasyVPN Gateway app, in the Start menu, shows all of this and how the gateway is doing.
         """);
 }

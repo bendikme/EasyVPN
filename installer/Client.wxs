@@ -129,7 +129,7 @@
   </Package>
 
   <Fragment>
-    <!-- Everything else publish.ps1 put in the folder (gost, Wintun, network.ps1, layer2.ps1, the licences),
+    <!-- Everything else publish.ps1 put in the folder (Wintun, network.ps1, layer2.ps1, the licences),
          harvested at build time so a new file is packaged without listing it here. -->
     <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.PublishDir)\**">

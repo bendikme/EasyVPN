@@ -49,12 +49,12 @@ $info = & $exe info
 
 if (-not (Get-Service $service -ErrorAction SilentlyContinue)) {
     New-Service -Name $service -BinaryPathName "`"$exe`"" -DisplayName 'EasyVPN Gateway' -StartupType Automatic `
-        -Description 'Connects the facility VPNs and relays EasyVPN clients to the one connected.' | Out-Null
+        -Description 'Connects the facility VPNs and carries EasyVPN clients'' traffic to the one connected.' | Out-Null
     sc.exe failure $service reset= 86400 actions= restart/5000/restart/5000/restart/60000 | Out-Null
 }
-# The API and the relay, on their default ports (gateway.json can move them).
+# The API, and the tunnel on it, on the default port (gateway.json can move it).
 if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalPort 8420, 8421 -Action Allow | Out-Null
+    New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalPort 8420 -Action Allow | Out-Null
 }
 Start-Service $service
 

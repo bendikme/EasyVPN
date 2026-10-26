@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The tunnel's checks: the packet link and the gateway's rules anywhere; with -admin, through
+       real Wintun adapters and Windows' own network stack. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EasyVPN.Agent\EasyVPN.Agent.csproj" />
+    <ProjectReference Include="..\..\src\EasyVPN.Gateway\EasyVPN.Gateway.csproj" />
+  </ItemGroup>
+  <!-- The same wintun.dll the installers ship, from publish.ps1's checked download. -->
+  <ItemGroup>
+    <None Include="..\..\artifacts\downloads\wintun\wintun\bin\amd64\wintun.dll" Link="wintun.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\artifacts\downloads\wintun\wintun\bin\amd64\wintun.dll')" />
+  </ItemGroup>
+</Project>

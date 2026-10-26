@@ -1,109 +1,167 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 
 namespace EasyVPN.Agent;
 
 /// <summary>
-/// This workstation's end of the tunnel. gost keeps the "EasyVPN" adapter up and carries the
-/// packets routed to it - all of them, ping as well as TCP and UDP - over TLS to the gateway's
-/// relay, whose hub puts them out on the gateway and into the connected facility's VPN, which the
-/// gateway shares with the tunnel. So the adapter works as the VPN client's own would on this PC,
-/// whichever VPN client it is. The adapter stays put whichever facility is connected; what changes
-/// is which networks network.ps1 routes to it, and which DNS names it sends to the facility.
+/// This workstation's end of the tunnel: the "EasyVPN" adapter, and its link to the gateway - a
+/// WebSocket on the gateway's API port, with its access key and pinned certificate - carrying the
+/// packets routed to the adapter, all of them, ping as well as TCP and UDP. The gateway puts them
+/// out on its own adapter, and into the connected facility's VPN, which it shares with the tunnel.
+/// So the adapter works as the VPN client's own would on this PC, whichever VPN client it is. The
+/// adapter stays put whichever facility is connected; what changes is which networks network.ps1
+/// routes to it, and which DNS names it sends to the facility. A link that drops is made again,
+/// the adapter staying as it is meanwhile.
 /// </summary>
 public sealed class Tunnel(RecentLog log)
 {
     public const string Adapter = Defaults.TunnelAdapter;
 
     private static readonly string Script = Path.Combine(AppContext.BaseDirectory, "network.ps1");
+    private static readonly TimeSpan LongestWait = TimeSpan.FromSeconds(10);
 
     private readonly RecentLog _log = log;
+    private readonly Lock _sync = new();
     private IReadOnlyList<string> _routes = [];
-    private GostProcess? _gost;
+    private Task? _run;
+    private CancellationTokenSource? _stop;
+    private object? _gateway;
+    private TunnelLease? _lease;
+    private volatile PacketLink? _link;
+    private volatile string? _problem;
 
-    // gost makes the adapter afresh each time it starts.
-    private GostProcess Gost => _gost ??= new(Path.Combine(AgentSettings.Folder, "tunnel.json"), _log.Add, () => _ = PrepareAsync());
+    /// <summary>The adapter's name and identity; others for a test.</summary>
+    public string AdapterName { get; init; } = Adapter;
+    public string AdapterGuid { get; init; } = Defaults.TunnelAdapterGuid;
 
-    public bool IsUp => Gost.IsRunning;
+    /// <summary>NetBIOS off and the names set on the adapter (network.ps1 Prepare): not for a test's.</summary>
+    public bool Prepare { get; init; } = true;
 
+    /// <summary>The link to the gateway is up: what is routed to the adapter gets there.</summary>
+    public bool IsUp => _link is not null;
+
+    /// <summary>Why it is not up, when it is not.</summary>
+    public string? Problem => _problem;
+
+    /// <summary>Makes the adapter and links it to the gateway, unless that is so already.</summary>
     /// <param name="lease">This PC's address on the tunnel, which the gateway gave it.</param>
-    public void Start(AgentSettings settings, int relayPort, TunnelLease lease) => Gost.Start(new
-    {
-        Log = new { Level = "warn" },
-        Services = new[]
-        {
-            new
-            {
-                Name = "tunnel",
-                Addr = ":0",
-                // It tells the gateway it is there every 10 s, so the gateway knows where its answers go.
-                Handler = new { Type = "tun", Chain = "gateway", Metadata = new { Keepalive = true, Ttl = "10s" } },
-                Listener = new
-                {
-                    Type = "tun",
-                    Metadata = new
-                    {
-                        Name = Adapter,
-                        Net = $"{lease.Address}/{lease.PrefixLength}",
-                        Mtu = Defaults.TunnelMtu,
-                        Guid = Defaults.TunnelAdapterGuid,
-                    },
-                },
-                // The gateway's relay takes it to its hub whatever this says.
-                Forwarder = new { Nodes = new[] { new { Name = "hub", Addr = $"127.0.0.1:{Defaults.TunnelHubPort}" } } },
-            },
-        },
-        Chains = new[]
-        {
-            new
-            {
-                Name = "gateway",
-                Hops = new[]
-                {
-                    new
-                    {
-                        Name = "gateway",
-                        Nodes = new[]
-                        {
-                            new
-                            {
-                                Name = "gateway",
-                                Addr = $"{Address(settings.Host)}:{relayPort}",
-                                Connector = new { Type = "relay", Auth = new { Username = Defaults.RelayUser, Password = settings.AccessKey } },
-                                Dialer = new
-                                {
-                                    Type = "tls",
-                                    Tls = new { Secure = true, ServerName = Defaults.CertificateName, CaFile = AgentSettings.CertificateFile },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    });
+    public void Start(GatewayClient gateway, TunnelLease lease) => Start(gateway.OpenTunnelAsync, lease, gateway);
 
-    public void Stop() => Gost.Stop();
-
-    /// <summary>
-    /// The gateway as Windows finds it - with this PC's DNS suffixes, the hosts file, LLMNR - since
-    /// gost's own resolver asks the DNS servers for the bare name, which fails for a short name such
-    /// as "gw01". The name itself if Windows cannot find it either.
-    /// </summary>
-    private static string Address(string host)
+    /// <param name="open">Opens the link to the gateway.</param>
+    /// <param name="gateway">Which gateway: linked to another, the tunnel starts over.</param>
+    public void Start(Func<CancellationToken, Task<WebSocket>> open, TunnelLease lease, object gateway)
     {
-        if (IPAddress.TryParse(host, out _)) return host;
+        lock (_sync)
+        {
+            if (_run is { IsCompleted: false } && ReferenceEquals(_gateway, gateway) && Equals(_lease, lease)) return;
+            StopLocked();
+            (_gateway, _lease, _stop) = (gateway, lease, new CancellationTokenSource());
+            var ct = _stop.Token;
+            _run = Task.Run(() => RunAsync(open, lease, ct), CancellationToken.None);
+        }
+    }
+
+    public void Stop()
+    {
+        lock (_sync) StopLocked();
+    }
+
+    private void StopLocked()
+    {
+        if (_run is null) return;
+        _stop!.Cancel();
+        _run.Wait(TimeSpan.FromSeconds(10));
+        _stop.Dispose();
+        (_run, _stop, _gateway, _lease) = (null, null, null, null);
+    }
+
+    private async Task RunAsync(Func<CancellationToken, Task<WebSocket>> open, TunnelLease lease, CancellationToken ct)
+    {
+        var address = IPAddress.Parse(lease.Address);
+        Wintun? adapter = null;
+        Thread? reader = null;
         try
         {
-            var addresses = Dns.GetHostAddresses(host);
-            var address = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
-            return address is null ? host : address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
+            while (adapter is null)
+            {
+                try
+                {
+                    adapter = Wintun.Create(AdapterName, AdapterGuid, address, lease.PrefixLength, Defaults.TunnelMtu);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or BadImageFormatException)
+                {
+                    Say($"The {AdapterName} adapter could not be made: {ex.Message}");
+                    await Task.Delay(LongestWait, ct);
+                }
+            }
+            if (Prepare) _ = PrepareAsync();
+            var made = adapter;
+            reader = new Thread(() => Read(made)) { IsBackground = true, Name = "EasyVPN tunnel" };
+            reader.Start();
+
+            var own = IPv4.Of(address);
+            var wait = TimeSpan.FromSeconds(1);
+            while (true)
+            {
+                try
+                {
+                    using var socket = await open(ct);
+                    var link = new PacketLink(socket, packet => Deliver(made, own, packet));
+                    _link = link;
+                    Say(null);
+                    _log.Add($"Tunnel to the gateway up, as {lease.Address}");
+                    wait = TimeSpan.FromSeconds(1);
+                    await link.RunAsync(ct);
+                    Say("The gateway closed the tunnel");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or WebSocketException or HttpRequestException or IOException or InvalidDataException or OperationCanceledException)
+                {
+                    Say($"The tunnel to the gateway: {ex.Message}");
+                }
+                finally
+                {
+                    _link = null;
+                }
+                await Task.Delay(wait, ct);
+                wait = TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, LongestWait.Ticks));
+            }
         }
-        catch (SocketException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return host;
+            // Stopped.
         }
+        finally
+        {
+            _link = null;
+            adapter?.Dispose();
+            reader?.Join(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    /// <summary>What Windows routes to the adapter, to the gateway; dropped while the link is down.</summary>
+    private void Read(Wintun adapter)
+    {
+        var packet = new byte[Wintun.MaxPacket];
+        int length;
+        while ((length = adapter.Read(packet)) > 0) _link?.Send(packet.AsSpan(0, length));
+    }
+
+    /// <summary>What the gateway sends, into Windows: only what is for this PC's own address on the tunnel.</summary>
+    private static bool Deliver(Wintun adapter, uint own, ReadOnlySpan<byte> packet) =>
+        IPv4.TryRead(packet, out _, out var destination) && destination == own && adapter.Write(packet);
+
+    /// <summary>A problem said once, not at each try; null when it is over.</summary>
+    private void Say(string? problem)
+    {
+        if (problem == _problem) return;
+        _problem = problem;
+        if (problem is not null) _log.Add(problem);
     }
 
     /// <summary>

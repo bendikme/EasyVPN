@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- What the gateway, the agent and the apps all speak: the API contracts, and the helpers the
-       two services share for running gost and PowerShell. -->
+       two services share: the tunnel (Wintun, the packet link) and running PowerShell. -->
   <PropertyGroup>
     <RootNamespace>EasyVPN</RootNamespace>
+    <!-- Wintun hands packets over in its own memory: copied there and back, with no copy between. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- Sets up the Layer 2 adapter; beside the exe of every project that uses this one. -->

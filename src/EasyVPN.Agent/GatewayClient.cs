@@ -70,7 +70,26 @@ public sealed class GatewayClient : IDisposable
     /// The gateway's Layer 2 port: a WebSocket on the same address, key and pinned certificate as
     /// the API, carrying Ethernet frames.
     /// </summary>
-    public async Task<WebSocket> OpenLayer2Async(CancellationToken ct)
+    public Task<WebSocket> OpenLayer2Async(CancellationToken ct) => OpenAsync("layer2", status => status switch
+    {
+        HttpStatusCode.Conflict => "The gateway's Layer 2 port is closed: the facility is not connected there.",
+        HttpStatusCode.ServiceUnavailable => "The gateway could not open its Layer 2 adapter. Its activity log says why.",
+        _ => null,
+    }, ct);
+
+    /// <summary>
+    /// The tunnel: a WebSocket on the same address, key and pinned certificate as the API, carrying
+    /// this PC's IP packets, at its address on the tunnel.
+    /// </summary>
+    public Task<WebSocket> OpenTunnelAsync(CancellationToken ct) => OpenAsync("tunnel/link", status => status switch
+    {
+        HttpStatusCode.NotFound => "The gateway runs an older EasyVPN than this PC, without its tunnel. It updates itself while nothing is connected.",
+        HttpStatusCode.ServiceUnavailable => "The gateway's end of the tunnel is not up. Its activity log says why.",
+        _ => null,
+    }, ct);
+
+    /// <param name="refused">What a refusal with a status means, said so someone can act on it; null for one that does not stop it trying again.</param>
+    private async Task<WebSocket> OpenAsync(string path, Func<HttpStatusCode, string?> refused, CancellationToken ct)
     {
         var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Authorization", $"Bearer {_settings.AccessKey}");
@@ -80,17 +99,19 @@ public sealed class GatewayClient : IDisposable
         socket.Options.CollectHttpResponseDetails = true;
         try
         {
-            var address = new Uri($"wss://{_settings.Host}:{_settings.ApiPort}/api/layer2");
+            var address = new Uri($"wss://{_settings.Host}:{_settings.ApiPort}/api/{path}");
             await socket.ConnectAsync(address, new HttpMessageInvoker(_handler, disposeHandler: false), ct);
             return socket;
         }
-        catch (WebSocketException) when (socket.HttpStatusCode is HttpStatusCode.Conflict or HttpStatusCode.ServiceUnavailable)
+        catch (WebSocketException) when (socket.HttpStatusCode == HttpStatusCode.Unauthorized)
         {
-            var status = socket.HttpStatusCode;
             socket.Dispose();
-            throw new InvalidOperationException(status == HttpStatusCode.Conflict
-                ? "The gateway's Layer 2 port is closed: the facility is not connected there."
-                : "The gateway could not open its Layer 2 adapter. Its activity log says why.");
+            throw new InvalidOperationException("The gateway did not accept the access key. Check it in Settings.");
+        }
+        catch (WebSocketException) when (refused(socket.HttpStatusCode) is { } why)
+        {
+            socket.Dispose();
+            throw new InvalidOperationException(why);
         }
         catch
         {
@@ -121,9 +142,6 @@ public sealed class GatewayClient : IDisposable
             _pin(thumbprint);
         else if (!string.Equals(thumbprint, _settings.Thumbprint, StringComparison.OrdinalIgnoreCase))
             return false;
-
-        if (!File.Exists(AgentSettings.CertificateFile))
-            File.WriteAllText(AgentSettings.CertificateFile, presented.ExportCertificatePem());
         return true;
     }
 

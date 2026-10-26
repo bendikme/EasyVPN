@@ -51,6 +51,7 @@ public sealed record GatewayStatus(
     string? FacilityId,
     string? Message,
     string? Client,
+    // gost's relay port, up to 0.4; 0 since the tunnel runs on the API port.
     int RelayPort,
     IReadOnlyList<LogLine> Log,
     IReadOnlyList<string>? Routes = null);
@@ -142,8 +143,8 @@ public sealed record AgentSettingsUpdate(string? Gateway, string? AccessKey, boo
 
 public static class Defaults
 {
+    /// <summary>The gateway's API, and the tunnel on it.</summary>
     public const int GatewayApiPort = 8420;
-    public const int GatewayRelayPort = 8421;
     public const string AgentUrl = "http://127.0.0.1:8429";
 
     /// <summary>
@@ -155,8 +156,6 @@ public static class Defaults
     /// <summary>The name in the gateway's self-signed certificate. Clients pin the certificate, not the name.</summary>
     public const string CertificateName = "easyvpn-gateway";
 
-    public const string RelayUser = "easyvpn";
-
     /// <summary>
     /// The tunnel's own network, from the benchmarking range no facility should be using. The
     /// gateway's end has <see cref="TunnelHub"/>; each workstation gets an address of its own.
@@ -165,10 +164,7 @@ public static class Defaults
 
     public const string TunnelHub = "198.18.0.1";
 
-    /// <summary>Where the gateway's end of the tunnel takes packets, from its relay only.</summary>
-    public const int TunnelHubPort = 8422;
-
-    /// <summary>Room for the TLS and TCP the packets travel in, and for the facility's VPN after that.</summary>
+    /// <summary>Room for the TLS, TCP and WebSocket the packets travel in, and for the facility's VPN after that.</summary>
     public const int TunnelMtu = 1380;
 
     /// <summary>
@@ -178,7 +174,7 @@ public static class Defaults
     public const string TunnelAdapter = "EasyVPN";
     public const string TunnelAdapterGuid = "{EE9A2589-4133-47FA-9858-85601C3D689D}";
 
-    /// <summary>The gateway's adapter, where the workstations' packets come out. gost wants no spaces in it.</summary>
+    /// <summary>The gateway's adapter, where the workstations' packets come out. Named so since 0.4, which Windows remembers.</summary>
     public const string GatewayAdapter = "EasyVPN-Gateway";
     public const string GatewayAdapterGuid = "{C6D4DDD3-E5F6-4BD5-BCA7-B8812077DA93}";
 

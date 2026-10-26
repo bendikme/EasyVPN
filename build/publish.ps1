@@ -2,13 +2,14 @@
     Builds EasyVPN into artifacts\, ready to copy to the machines:
 
       artifacts\Gateway   for the gateway: EasyVPN.Gateway.exe (the service), EasyVPN.GatewayApp.exe
-                          (its status, in the notification area), gost.exe, wintun.dll, connectors\,
-                          sharing.ps1, install-gateway.ps1
-      artifacts\Client    for each workstation: EasyVPN.exe, EasyVPN.Agent.exe, gost.exe, wintun.dll,
+                          (its status, in the notification area), wintun.dll, connectors\, sharing.ps1,
+                          install-gateway.ps1
+      artifacts\Client    for each workstation: EasyVPN.exe, EasyVPN.Agent.exe, wintun.dll,
                           install-client.ps1
 
-    Everything is self-contained: the machines need no .NET installed. gost and Wintun are
-    downloaded from their releases and checked against the hashes pinned below.
+    Everything is self-contained: the machines need no .NET installed. Wintun (WireGuard's, signed
+    by them), the one thing not built here, is downloaded from its release and checked against the
+    hash pinned below. The tunnel itself is EasyVPN's own (Wintun.cs, PacketLink.cs) since 0.5.
 
         .\build\publish.ps1
         .\build\publish.ps1 -Version 1.2.3    stamped with that version (release.ps1 does this)
@@ -27,12 +28,6 @@ $downloads = Join-Path $artifacts 'downloads'
 
 # To update one: change the URL, run this, check the new release, and pin the hash it reports.
 $binaries = @{
-    gost   = @{
-        Url     = 'https://github.com/go-gost/gost/releases/download/v3.3.1/gost_3.3.1_windows_amd64.zip'
-        Sha256  = '5FDD15C9BEEB74C69FF36272FA8DD3C6A1C04A980DE6E4267F8F886E56A136FD'
-        File    = 'gost.exe'
-        License = 'LICENSE'
-    }
     wintun = @{
         Url     = 'https://www.wintun.net/builds/wintun-0.14.1.zip'
         Sha256  = '07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51'
@@ -74,19 +69,16 @@ $gateway = Join-Path $artifacts 'Gateway'
 $client = Join-Path $artifacts 'Client'
 Remove-Item $gateway, $client -Recurse -Force -ErrorAction SilentlyContinue
 
-$gost = Get-Binary gost
 $wintun = Get-Binary wintun
 
 Publish-Project EasyVPN.Gateway $gateway
 Publish-Project EasyVPN.GatewayApp $gateway
-Copy-Item $gost.File, $wintun.File, "$PSScriptRoot\install-gateway.ps1" $gateway
-Copy-Item $gost.License (Join-Path $gateway 'gost-LICENSE.txt')
+Copy-Item $wintun.File, "$PSScriptRoot\install-gateway.ps1" $gateway
 Copy-Item $wintun.License (Join-Path $gateway 'wintun-LICENSE.txt')
 
 Publish-Project EasyVPN.Agent $client
 Publish-Project EasyVPN $client
-Copy-Item $gost.File, $wintun.File, "$PSScriptRoot\install-client.ps1" $client
-Copy-Item $gost.License (Join-Path $client 'gost-LICENSE.txt')
+Copy-Item $wintun.File, "$PSScriptRoot\install-client.ps1" $client
 Copy-Item $wintun.License (Join-Path $client 'wintun-LICENSE.txt')
 
 Write-Output "Built $gateway and $client"

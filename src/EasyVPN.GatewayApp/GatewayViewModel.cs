@@ -124,8 +124,8 @@ public sealed class GatewayViewModel : ObservableObject
 
     private string ActiveName => Active?.Name ?? _overview?.Status.FacilityId ?? "the facility";
 
-    /// <summary>The ports workstations reach the gateway on.</summary>
-    public string PortsText => $"API {ApiPort} · relay {_overview?.Status.RelayPort ?? Defaults.GatewayRelayPort}";
+    /// <summary>The port workstations reach the gateway on: its API, and the tunnel on it.</summary>
+    public string PortsText => $"Port {ApiPort}";
 
     // ---------------------------------------------------------------- activity
 

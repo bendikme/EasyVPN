@@ -24,7 +24,7 @@ public sealed class AgentSettings
 
     public static string Folder => DataDirectory.Get("Client");
 
-    /// <summary>The pinned certificate itself, which gost on this side trusts as its only root.</summary>
+    /// <summary>The pinned certificate as a file, which gost read up to 0.4: deleted where it is left.</summary>
     public static string CertificateFile => Path.Combine(Folder, "gateway.crt");
 
     private static string FilePath => Path.Combine(Folder, "agent.json");

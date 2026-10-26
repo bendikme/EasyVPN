@@ -26,7 +26,6 @@ public sealed class ConnectionController(
     Hub hub,
     Sharing sharing,
     Layer2Port layer2,
-    GatewaySettings settings,
     RecentLog log) : BackgroundService
 {
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
@@ -76,7 +75,7 @@ public sealed class ConnectionController(
     {
         get
         {
-            lock (_sync) return new GatewayStatus(_state, _facility?.Id, _message, _client, settings.RelayPort, log.Snapshot(), _routes);
+            lock (_sync) return new GatewayStatus(_state, _facility?.Id, _message, _client, 0, log.Snapshot(), _routes);
         }
     }
 
@@ -448,7 +447,7 @@ public sealed class ConnectionController(
                 int request;
                 lock (_sync) (facility, state, request) = (_facility, _state, _request);
 
-                // gost started again, and made its adapter again: shared with nothing.
+                // The hub's adapter made again: shared with nothing.
                 if (facility is not null && state == ConnectionState.Connected && _sharedAt is { } shared && shared != hub.Launches)
                 {
                     try
@@ -524,8 +523,8 @@ public sealed class ConnectionController(
     }
 
     /// <summary>
-    /// Starts the tunnel's end here. One that cannot start - gost.exe gone, say, taken by an
-    /// antivirus - is said once, and tried again every few seconds; the gateway runs on meanwhile.
+    /// Starts the tunnel's end here. One that cannot start - wintun.dll gone, say, or its adapter
+    /// not made - is said once, and tried again every few seconds; the gateway runs on meanwhile.
     /// </summary>
     private void StartHub()
     {
@@ -534,7 +533,7 @@ public sealed class ConnectionController(
             hub.Start();
             _hubProblem = null;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or DllNotFoundException or BadImageFormatException)
         {
             var problem = $"The tunnel for the workstations could not be started: {ex.Message}";
             if (problem != _hubProblem) log.Add(problem);

@@ -8,5 +8,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EasyVPN.Tests/EasyVPN.Tests.csproj" />
+    <Project Path="tests/EasyVPN.TunnelTests/EasyVPN.TunnelTests.csproj" />
   </Folder>
 </Solution>

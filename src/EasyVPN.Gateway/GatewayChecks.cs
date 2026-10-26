@@ -65,10 +65,10 @@ public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors
             var ports = ((string)rule.LocalPorts).Split(',', StringSplitOptions.TrimEntries);
             if (!(bool)rule.Enabled)
                 return new(subject, CheckLevel.Problem, $"The \"{FirewallRule}\" rule is turned off, so workstations cannot get in.");
-            if (!ports.Contains($"{settings.ApiPort}") || !ports.Contains($"{settings.RelayPort}"))
+            if (!ports.Contains($"{settings.ApiPort}"))
                 return new(subject, CheckLevel.Warning,
-                    $"The \"{FirewallRule}\" rule lets in TCP {rule.LocalPorts}, but this gateway uses {settings.ApiPort} and {settings.RelayPort} (gateway.json).");
-            return new(subject, CheckLevel.Ok, $"TCP {settings.ApiPort} and {settings.RelayPort} are open to workstations.");
+                    $"The \"{FirewallRule}\" rule lets in TCP {rule.LocalPorts}, but this gateway uses {settings.ApiPort} (gateway.json).");
+            return new(subject, CheckLevel.Ok, $"TCP {settings.ApiPort} is open to workstations.");
         }
         catch (Exception ex)
         {

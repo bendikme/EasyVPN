@@ -10,7 +10,7 @@ using EasyVPN.Gateway;
 
 internal static class ServiceChecks
 {
-    // Start the real gateway entry point in a disposable directory. There is no gost.exe,
+    // Start the real gateway entry point in a disposable directory. There is no wintun.dll,
     // and sharing.ps1 and the connector are stand-ins: no adapter, route, DNS or ICS changes.
     public static async Task RunAsync(string root)
     {
@@ -30,7 +30,7 @@ internal static class ServiceChecks
             """);
         DataDirectory.WriteJson(Path.Combine(GatewaySettings.Folder, "gateway.json"), new GatewaySettings
         {
-            ListenAddress = "127.0.0.1", ApiPort = apiPort, RelayPort = FreePort(), AccessKey = "test-access-key",
+            ListenAddress = "127.0.0.1", ApiPort = apiPort, AccessKey = "test-access-key",
         });
         DataDirectory.WriteJson(Path.Combine(GatewaySettings.Folder, "facilities.json"), new FacilityFile(
         [
@@ -90,7 +90,9 @@ internal static class ServiceChecks
             var settings = new AgentSettings { Gateway = $"127.0.0.1:{apiPort}", AccessKey = "test-access-key" };
             using var client = new GatewayClient(settings, thumbprint => settings.Thumbprint = thumbprint);
             Require((await client.FacilitiesAsync(CancellationToken.None)).Length == 3, "Client could not read the catalog");
-            Require(settings.Thumbprint is { Length: 64 } && File.Exists(AgentSettings.CertificateFile), "Client did not pin the certificate");
+            Require(settings.Thumbprint is { Length: 64 }, "Client did not pin the certificate");
+            // The pinned certificate as a file was for gost, up to 0.4.
+            Require(!File.Exists(AgentSettings.CertificateFile), "Client wrote the certificate file gost read");
             try { using var socket = await client.OpenLayer2Async(CancellationToken.None); throw new Exception("Gateway opened Layer 2 with no connected facility"); }
             catch (InvalidOperationException ex) when (ex.Message.Contains("port is closed")) { }
             var lease = await client.TunnelAsync(CancellationToken.None);

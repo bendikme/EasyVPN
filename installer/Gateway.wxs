@@ -4,7 +4,7 @@
   EasyVPN Gateway - Windows Installer authoring (WiX v5, v4 schema). Build it with build\release.ps1.
 
   A per-machine package for the machine (or VM) that has the customers' VPN clients installed: the
-  EasyVPN Gateway service in %ProgramFiles%\EasyVPN Gateway, a firewall rule for its API and relay,
+  EasyVPN Gateway service in %ProgramFiles%\EasyVPN Gateway, a firewall rule for its API and tunnel,
   and the EasyVPN Gateway app - the gateway's status, access key, fingerprint and facilities, in
   the notification area of everyone who signs in to the gateway. The same folder, service, rule
   and app as build\install-gateway.ps1.
@@ -60,7 +60,7 @@
       <File Id="GatewayExe" Source="$(var.PublishDir)\EasyVPN.Gateway.exe" KeyPath="yes" />
       <ServiceInstall Name="EasyVPN.Gateway"
                       DisplayName="EasyVPN Gateway"
-                      Description="Connects the facility VPNs and relays EasyVPN clients to the one connected."
+                      Description="Connects the facility VPNs and carries EasyVPN clients' traffic to the one connected."
                       Type="ownProcess"
                       Start="auto"
                       ErrorControl="normal"
@@ -72,14 +72,15 @@
                             RestartServiceDelayInSeconds="5"
                             ResetPeriodInDays="1" />
       </ServiceInstall>
-      <!-- Stopping it also takes down the facility's VPN and the relay. -->
+      <!-- Stopping it also takes down the facility's VPN and the tunnel. -->
       <ServiceControl Id="Service" Name="EasyVPN.Gateway" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-      <!-- The API and the relay, on their default ports (gateway.json can move them). -->
+      <!-- The API, and the tunnel on it, on the default port (gateway.json can move it). Up to 0.4
+           gost's relay had 8421 too: this rule replaces that one. -->
       <fw:FirewallException Id="GatewayPorts"
                             Name="EasyVPN Gateway"
-                            Description="EasyVPN clients: the gateway's API and relay."
+                            Description="EasyVPN clients: the gateway's API and tunnel."
                             Protocol="tcp"
-                            Port="8420,8421"
+                            Port="8420"
                             Scope="any"
                             Profile="all" />
     </Component>
@@ -128,7 +129,7 @@
   </Package>
 
   <Fragment>
-    <!-- Everything else publish.ps1 put in the folder (gost, Wintun, the connectors, sharing.ps1,
+    <!-- Everything else publish.ps1 put in the folder (Wintun, the connectors, sharing.ps1,
          layer2.ps1, the sample facilities, the licences), harvested at build time so a new file
          is packaged without listing it here. -->
     <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">

@@ -6,15 +6,14 @@ namespace EasyVPN.Gateway;
 
 /// <summary>
 /// The gateway's own settings, in <c>%ProgramData%\EasyVPN\Gateway\gateway.json</c>. The access
-/// key is made on first start; clients need it for the API, and the relay takes it as its password.
+/// key is made on first start; clients need it for the API and the tunnel on it.
 /// </summary>
 public sealed class GatewaySettings
 {
-    /// <summary>The address the API and the relay listen on; every address when not set.</summary>
+    /// <summary>The address the API, and the tunnel on it, listen on; every address when not set.</summary>
     public string? ListenAddress { get; set; }
 
     public int ApiPort { get; set; } = Defaults.GatewayApiPort;
-    public int RelayPort { get; set; } = Defaults.GatewayRelayPort;
     public string AccessKey { get; set; } = "";
 
     public static string Folder => DataDirectory.Get("Gateway");
