@@ -18,21 +18,24 @@
         "C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt
     Check: the gateway app there, and a Lock set. It does not touch the client.
 #>
+#check-shared: program
+#check-needs: lock
 param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
-if (-not $env:EASYVPN_LOCK) { throw 'Set "lock" to the Lock''s name as Tosi Client lists it.' }
 $gateway = $env:EASYVPN_GATEWAY
 $app = Join-Path (Split-Path $gateway) 'EasyVPN.GatewayApp.exe'
 if (-not (Test-Path $app)) { throw "The EasyVPN Gateway app is not beside the gateway ($app)." }
 $notHere = 3
 
+# Every Lock goes through the one Tosi Client: checked once for them all (#check-shared above).
 if ($Action -eq 'Check') {
     if ($env:EASYVPN_PROGRAM -and -not (Test-Path $env:EASYVPN_PROGRAM)) { throw "Tosi Client is not at $env:EASYVPN_PROGRAM." }
-    Write-Output "Tosi Client on the gateway's desktop, Lock '$env:EASYVPN_LOCK'"
+    Write-Output "Tosi Client on the gateway's desktop"
     return
 }
+if (-not $env:EASYVPN_LOCK) { throw 'Set "lock" to the Lock''s name as Tosi Client lists it.' }
 
 # Tosi Client on any desktop (its window, or its agent in the notification area).
 $running = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 -and $_.ProcessName -like 'tosi*' }

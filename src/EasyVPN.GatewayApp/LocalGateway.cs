@@ -8,18 +8,21 @@ public sealed class LocalGateway
 {
     private sealed record Problem(string? Title, string? Detail);
 
+    // An answer that takes this long has not got stuck: the service is busy, not gone.
+    private static readonly TimeSpan Quick = TimeSpan.FromSeconds(10);
+
     private readonly HttpClient _http = new()
     {
         BaseAddress = new Uri($"http://127.0.0.1:{Defaults.GatewayLocalPort}/local/"),
-        // Checking every facility's VPN client takes a while.
-        Timeout = TimeSpan.FromMinutes(2),
+        Timeout = Timeout.InfiniteTimeSpan,
     };
 
     public LocalGateway() => _http.DefaultRequestHeaders.Add(Defaults.AgentHeader, "1");
 
     public Task<GatewayOverview> OverviewAsync() => GetAsync<GatewayOverview>("overview");
 
-    public Task<CheckResult[]> ChecksAsync() => GetAsync<CheckResult[]>("checks");
+    /// <summary>What the service knows of its checks, at once; with <paramref name="refresh"/>, it checks everything again, in the background.</summary>
+    public Task<GatewayCheckRun> ChecksAsync(bool refresh) => GetAsync<GatewayCheckRun>(refresh ? "checks?refresh=true" : "checks");
 
     public async Task ConnectAsync(string id)
     {
@@ -33,7 +36,7 @@ public sealed class LocalGateway
 
     public async Task CheckUpdatesAsync()
     {
-        using var _ = await SendAsync(HttpMethod.Post, "update/check");
+        using var _ = await SendAsync(HttpMethod.Post, "update/check", TimeSpan.FromMinutes(1));
     }
 
     public async Task InstallUpdateAsync()
@@ -43,26 +46,34 @@ public sealed class LocalGateway
 
     public async Task AddLayer2AdapterAsync()
     {
-        using var _ = await SendAsync(HttpMethod.Post, "layer2");
+        using var _ = await SendAsync(HttpMethod.Post, "layer2", TimeSpan.FromMinutes(3));
     }
 
-    private async Task<T> GetAsync<T>(string path)
+    private async Task<T> GetAsync<T>(string path, TimeSpan? limit = null)
     {
-        using var response = await SendAsync(HttpMethod.Get, path);
+        using var response = await SendAsync(HttpMethod.Get, path, limit);
         return await response.Content.ReadFromJsonAsync<T>(Defaults.Json) ?? throw new GatewayException("The gateway sent an empty answer.");
     }
 
-    /// <exception cref="GatewayException">The service is not running, or said why it could not do it.</exception>
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path)
+    /// <exception cref="GatewayException">The service is not running, took too long, or said why it could not do it.</exception>
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, TimeSpan? limit = null)
     {
+        var wait = limit ?? Quick;
         HttpResponseMessage response;
+        using var timeout = new CancellationTokenSource(wait);
         try
         {
-            response = await _http.SendAsync(new HttpRequestMessage(method, path));
+            response = await _http.SendAsync(new HttpRequestMessage(method, path), timeout.Token);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (HttpRequestException)
         {
+            // Nothing listens: the service is not there.
             throw new GatewayException("The EasyVPN Gateway service is not running on this machine.", serviceDown: true);
+        }
+        catch (TaskCanceledException)
+        {
+            // It is there, and busy.
+            throw new GatewayException($"The EasyVPN Gateway service took longer than {Say(wait)} to answer.");
         }
         if (response.IsSuccessStatusCode) return response;
 
@@ -80,6 +91,8 @@ public sealed class LocalGateway
             throw new GatewayException(problem?.Detail ?? problem?.Title ?? $"The gateway answered {(int)response.StatusCode}.");
         }
     }
+
+    private static string Say(TimeSpan span) => span.TotalMinutes >= 1 ? $"{span.TotalMinutes:0} minutes" : $"{span.TotalSeconds:0} s";
 }
 
 public sealed class GatewayException(string message, bool serviceDown = false) : Exception(message)

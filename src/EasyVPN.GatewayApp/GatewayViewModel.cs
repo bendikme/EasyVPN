@@ -14,16 +14,20 @@ namespace EasyVPN.GatewayApp;
 /// </summary>
 public sealed class GatewayViewModel : ObservableObject
 {
-    private static readonly TimeSpan ChecksEvery = TimeSpan.FromMinutes(5);
+    // The service checks in the background and keeps what it found; this only reads it.
+    private static readonly TimeSpan ReadChecksEvery = TimeSpan.FromSeconds(10);
 
     private readonly LocalGateway _gateway;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private GatewayOverview? _overview;
     private bool _serviceOnline = true;
     private string? _error;
+    private string? _pollProblem;
     private bool _polling;
     private bool _checking;
     private DateTime _checked = DateTime.MinValue;
+    private DateTime _checksRead = DateTime.MinValue;
+    private bool _readingChecks;
     private string _facilities = "";
     private bool _updating;
 
@@ -32,7 +36,7 @@ public sealed class GatewayViewModel : ObservableObject
         _gateway = gateway;
         ConnectCommand = new AsyncRelayCommand(p => ActAsync(() => _gateway.ConnectAsync(((FacilityRow)p!).Id)));
         DisconnectCommand = new AsyncRelayCommand(() => ActAsync(_gateway.DisconnectAsync));
-        CheckCommand = new AsyncRelayCommand(CheckAsync);
+        CheckCommand = new AsyncRelayCommand(() => ReadChecksAsync(refresh: true));
         FixCommand = new AsyncRelayCommand(p => FixAsync((CheckRow)p!));
         CopyCommand = new RelayCommand(p => Copy(p as string));
         ShowAccessKeyCommand = new RelayCommand(() => Elevated.Start(Environment.ProcessPath!, "--access-key"));
@@ -259,12 +263,20 @@ public sealed class GatewayViewModel : ObservableObject
             {
                 _overview = await _gateway.OverviewAsync();
                 _serviceOnline = true;
+                // What a slow answer said is over once one comes in time.
+                if (Error is not null && Error == _pollProblem) Error = null;
+                _pollProblem = null;
+            }
+            catch (GatewayException ex) when (ex.ServiceDown)
+            {
+                _overview = null;
+                _serviceOnline = false;
             }
             catch (GatewayException ex)
             {
-                _overview = null;
-                _serviceOnline = !ex.ServiceDown;
-                if (!ex.ServiceDown) Error = ex.Message;
+                // There, and slow: what it showed last stays.
+                _serviceOnline = true;
+                Error = _pollProblem = ex.Message;
             }
             var changed = Refresh();
             Collect(_overview?.Status.Log ?? []);
@@ -276,7 +288,7 @@ public sealed class GatewayViewModel : ObservableObject
                 UpdateInstalling?.Invoke();
             }
 
-            if (_serviceOnline && (changed || DateTime.Now - _checked > ChecksEvery)) _ = CheckAsync();
+            if (_serviceOnline && (changed || _checking || DateTime.Now - _checksRead > ReadChecksEvery)) _ = ReadChecksAsync(refresh: false);
         }
         finally
         {
@@ -311,28 +323,37 @@ public sealed class GatewayViewModel : ObservableObject
         return changed;
     }
 
-    private async Task CheckAsync()
+    /// <summary>
+    /// What the service has found: it checks in the background, at its own pace, and keeps it. This
+    /// only reads it - which takes no time - or, with <paramref name="refresh"/> (the Refresh button),
+    /// asks it to check everything again.
+    /// </summary>
+    private async Task ReadChecksAsync(bool refresh)
     {
-        if (_checking || !_serviceOnline) return;
-        _checking = true;
-        OnPropertyChanged(string.Empty);
+        if (_readingChecks || !_serviceOnline) return;
+        _readingChecks = true;
         try
         {
-            var results = await _gateway.ChecksAsync();
+            var run = await _gateway.ChecksAsync(refresh);
+            _checksRead = DateTime.Now;
             SystemChecks.Clear();
-            foreach (var result in results.Where(r => r.FacilityId is null)) SystemChecks.Add(new CheckRow(result));
+            foreach (var result in run.Results.Where(r => r.FacilityId is null)) SystemChecks.Add(new CheckRow(result));
             foreach (var facility in Facilities)
-                facility.Readiness = results.FirstOrDefault(r => string.Equals(r.FacilityId, facility.Id, StringComparison.OrdinalIgnoreCase));
-            _checked = DateTime.Now;
-            Error = null;
+                facility.Readiness = run.Results.FirstOrDefault(r => string.Equals(r.FacilityId, facility.Id, StringComparison.OrdinalIgnoreCase));
+            if (_checking && !run.Running || !run.Running && _checked == DateTime.MinValue) _checked = DateTime.Now;
+            _checking = run.Running || refresh;
         }
-        catch (GatewayException ex)
+        catch (GatewayException ex) when (!ex.ServiceDown)
         {
             Error = ex.Message;
         }
+        catch (GatewayException)
+        {
+            // The service went: the status bar says so.
+        }
         finally
         {
-            _checking = false;
+            _readingChecks = false;
             OnPropertyChanged(string.Empty);
         }
     }
@@ -343,7 +364,7 @@ public sealed class GatewayViewModel : ObservableObject
         {
             case GatewayFix.Layer2Adapter:
                 await ActAsync(_gateway.AddLayer2AdapterAsync);
-                await CheckAsync();
+                await ReadChecksAsync(refresh: true);
                 break;
             case GatewayFix.Bridge:
                 Elevated.Open("ncpa.cpl");
@@ -408,12 +429,18 @@ public sealed class FacilityRow(FacilityInfo info) : ObservableObject
         get => _state;
         set
         {
-            if (SetProperty(ref _state, value)) Raise(nameof(IsCarried));
+            if (SetProperty(ref _state, value)) Raise(nameof(IsCarried), nameof(IsLeaving), nameof(IsFree));
         }
     }
 
     /// <summary>The gateway carries it, or is getting to: Disconnect, rather than Connect.</summary>
     public bool IsCarried => _state is ConnectionState.Connecting or ConnectionState.Connected or ConnectionState.Interrupted;
+
+    /// <summary>On its way down, which can take a VPN client a minute: neither Connect nor Disconnect, but saying so.</summary>
+    public bool IsLeaving => _state is ConnectionState.Disconnecting;
+
+    /// <summary>Neither carried nor on its way down: Connect.</summary>
+    public bool IsFree => !IsCarried && !IsLeaving;
 
     /// <summary>What the gateway says of it while it carries it: the latest step, or how it ended.</summary>
     public string? Message

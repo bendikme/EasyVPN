@@ -123,7 +123,7 @@ public sealed class ConnectionController(
                 if (request != _request) return; // A newer request takes it from here.
             }
 
-            if (!await TearDownAsync(request, switching: target is not null))
+            if (!await TearDownAsync(request, keepSharing: true))
                 return;
 
             if (target is null)
@@ -327,18 +327,21 @@ public sealed class ConnectionController(
     }
 
     /// <summary>Closes the way in and disconnects what is up. False, and Failed, if it still answers.</summary>
-    /// <param name="switching">
-    /// Another facility follows. Sharing is left on: the next one most often goes through the same
-    /// VPN client's adapter - every Tosibox Lock through Tosi Client's - and turning sharing off and
-    /// on again takes seconds. The workstations route nothing to the gateway meanwhile. It does go
-    /// should this facility not go down, and when the next one ends up on another adapter.
+    /// <param name="keepSharing">
+    /// Asked to disconnect, or to connect another facility. Sharing is left on the VPN client's
+    /// adapter: once its client has disconnected it leads nowhere, and the workstations route
+    /// nothing to the gateway; the next facility most often goes through the same client's adapter
+    /// - every Tosibox Lock through Tosi Client's - and connects without sharing again, which takes
+    /// Windows from seconds to half a minute. It does go should this facility not go down, when the
+    /// next one ends up on another adapter, when a facility fails or is interrupted, and when the
+    /// gateway stops.
     /// </param>
-    private async Task<bool> TearDownAsync(int request, bool switching = false)
+    private async Task<bool> TearDownAsync(int request, bool keepSharing = false)
     {
         // Sharing goes while the VPN client is told to disconnect, not before: should Windows' sharing
         // hang, the facility still goes down meanwhile.
         Task closing;
-        if (switching)
+        if (keepSharing)
         {
             layer2.Close();
             closing = Task.CompletedTask;

@@ -111,6 +111,9 @@ public enum CheckLevel
 /// </summary>
 public sealed record CheckResult(string Subject, CheckLevel Level, string Text, string? Fix = null, string? FacilityId = null);
 
+/// <summary>What the gateway knows of its checks, and whether it is checking now (in the background).</summary>
+public sealed record GatewayCheckRun(IReadOnlyList<CheckResult> Results, bool Running);
+
 public static class GatewayFix
 {
     /// <summary>The gateway service adds the "EasyVPN L2" adapter.</summary>

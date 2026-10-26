@@ -23,6 +23,7 @@ public sealed class Connectors(RecentLog log)
     private readonly Lock _sync = new();
     private DateTime _sharedLoaded;
     private SharedSettings _shared = new();
+    private readonly Dictionary<string, (DateTime Changed, (string[]? Reads, string[] Needs) Shape)> _shapes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="progress">Told each line the script prints, as it prints it.</param>
     /// <returns>The script's exit code: 0 for success.</returns>
@@ -86,6 +87,88 @@ public sealed class Connectors(RecentLog log)
         return code == 0
             ? new(facility.Name, CheckLevel.Ok, text.Length > 0 ? text : "Ready", FacilityId: facility.Id)
             : new(facility.Name, CheckLevel.Problem, text.Length > 0 ? text : $"The {facility.Connector} connector's check failed (exit code {code}).", FacilityId: facility.Id);
+    }
+
+    /// <summary>
+    /// What a facility's check depends on, as text: the facility as it is, its connector's script
+    /// (which one, and when it last changed), and what its connector's facilities share. A check
+    /// is done again only when this changes (<see cref="GatewayChecks"/>).
+    /// </summary>
+    public string Fingerprint(Facility facility)
+    {
+        var script = Find(facility.Connector);
+        var changed = script is null ? DateTime.MinValue : File.GetLastWriteTimeUtc(script);
+        return string.Join('|',
+            JsonSerializer.Serialize(facility, Defaults.Json),
+            script ?? "",
+            changed.Ticks,
+            JsonSerializer.Serialize(Shared(facility.Connector), Defaults.Json));
+    }
+
+    /// <summary>
+    /// Which facilities share one check: those alike in what their connector's Check reads. A script
+    /// that says so (<c>#check-shared: program</c>) is checked once for all of them - every Tosibox
+    /// Lock goes through the one Tosi Client - and one that does not, once for each facility.
+    /// </summary>
+    public string CheckGroup(Facility facility)
+    {
+        var script = Find(facility.Connector);
+        if (script is null || ShapeOf(script).Reads is not { } reads) return Fingerprint(facility);
+        var settings = SettingsOf(facility);
+        return string.Join('|',
+            facility.Connector,
+            script,
+            File.GetLastWriteTimeUtc(script).Ticks,
+            Password(facility) ?? "",
+            string.Join(',', reads.Select(name => $"{name}={settings.GetValueOrDefault(name)}")));
+    }
+
+    /// <summary>
+    /// A check done for a group (<see cref="CheckGroup"/>), as one facility's: with what each must
+    /// have (<c>#check-needs: lock</c>) looked at for it here, without the script.
+    /// </summary>
+    public CheckResult ForFacility(CheckResult result, Facility facility)
+    {
+        var script = Find(facility.Connector);
+        var settings = SettingsOf(facility);
+        if (script is not null && ShapeOf(script).Needs.FirstOrDefault(name => !settings.ContainsKey(name)) is { } missing)
+            return new(facility.Name, CheckLevel.Problem, $"Set \"{missing}\" for {facility.Name}.", FacilityId: facility.Id);
+        return result with { Subject = facility.Name, FacilityId = facility.Id };
+    }
+
+    /// <summary>The facility's settings over what its connector's facilities share; only those with a value.</summary>
+    private Dictionary<string, string> SettingsOf(Facility facility)
+    {
+        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in new[] { Shared(facility.Connector)?.Settings ?? [], facility.Settings })
+            foreach (var (key, value) in source.Where(s => !string.IsNullOrWhiteSpace(s.Value)))
+                settings[key] = value;
+        return settings;
+    }
+
+    /// <summary>
+    /// What a connector's script says of its Check, in lines of its own: <c>#check-shared:</c> the
+    /// settings it reads, when those are all (null: it says nothing, so each facility's own); and
+    /// <c>#check-needs:</c> the settings each facility must have.
+    /// </summary>
+    private (string[]? Reads, string[] Needs) ShapeOf(string script)
+    {
+        var changed = File.GetLastWriteTimeUtc(script);
+        lock (_sync)
+        {
+            if (_shapes.TryGetValue(script, out var known) && known.Changed == changed) return known.Shape;
+        }
+        string[]? reads = null;
+        var needs = Array.Empty<string>();
+        foreach (var line in File.ReadLines(script).Take(80))
+        {
+            if (line.StartsWith("#check-shared:", StringComparison.Ordinal)) reads = Names(line["#check-shared:".Length..]);
+            else if (line.StartsWith("#check-needs:", StringComparison.Ordinal)) needs = Names(line["#check-needs:".Length..]);
+        }
+        lock (_sync) _shapes[script] = (changed, (reads, needs));
+        return (reads, needs);
+
+        static string[] Names(string list) => list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     /// <summary>The facility's own password, or else the one its connector's facilities share; null for none.</summary>

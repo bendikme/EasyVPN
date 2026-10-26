@@ -184,7 +184,7 @@
                                 <DataTemplate>
                                     <Border Padding="16,12" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="0,0,0,1">
                                         <DockPanel>
-                                            <!-- The one carried: Disconnect. Any other: Connect, which takes it over. -->
+                                            <!-- The one carried: Disconnect; on its way down, saying so. Any other: Connect, which takes it over. -->
                                             <Grid DockPanel.Dock="Right" Margin="12,0,0,0" VerticalAlignment="Top">
                                                 <Button Style="{StaticResource SecondaryButtonStyle}"
                                                         MinWidth="96"
@@ -192,12 +192,18 @@
                                                         ToolTip="Connects it from here, as a workstation would: whatever is connected now is disconnected first"
                                                         Command="{Binding DataContext.ConnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         CommandParameter="{Binding}"
-                                                        Visibility="{Binding IsCarried, Converter={StaticResource Visible}, ConverterParameter=invert}" />
+                                                        Visibility="{Binding IsFree, Converter={StaticResource Visible}}" />
                                                 <Button Style="{StaticResource DangerButtonStyle}"
                                                         MinWidth="96"
                                                         Content="Disconnect"
                                                         Command="{Binding DataContext.DisconnectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         Visibility="{Binding IsCarried, Converter={StaticResource Visible}}" />
+                                                <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                        MinWidth="96"
+                                                        Content="Disconnecting…"
+                                                        IsEnabled="False"
+                                                        ToolTip="Its VPN client is being disconnected; that can take a minute"
+                                                        Visibility="{Binding IsLeaving, Converter={StaticResource Visible}}" />
                                             </Grid>
                                             <Button DockPanel.Dock="Right"
                                                     Margin="8,0,0,0"

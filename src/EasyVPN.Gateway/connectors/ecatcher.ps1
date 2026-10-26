@@ -19,11 +19,12 @@
         C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File "C:\Program Files\EasyVPN Gateway\ecatcher-ui.ps1" Dump
     Check: eCatcher installed, and an Ewon, account and user set. It does not touch eCatcher.
 #>
+#check-shared: program, account, user
+#check-needs: ewon
 param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
-if (-not $env:EASYVPN_EWON) { throw 'Set "ewon" to the Ewon''s name as eCatcher lists it.' }
 $gateway = $env:EASYVPN_GATEWAY
 $ui = Join-Path (Split-Path $gateway) 'ecatcher-ui.ps1'
 if (-not (Test-Path $ui)) { throw "ecatcher-ui.ps1 is not beside the gateway ($ui)." }
@@ -42,9 +43,10 @@ if ($Action -eq 'Check') {
     if (-not $env:EASYVPN_ACCOUNT -or -not $env:EASYVPN_USER) {
         throw 'Set the Talk2M account and user: for this facility, or for every eCatcher facility in Settings.'
     }
-    Write-Output "eCatcher on the gateway's desktop, Ewon '$env:EASYVPN_EWON' in account $env:EASYVPN_ACCOUNT as $env:EASYVPN_USER"
+    Write-Output "eCatcher on the gateway's desktop, account $env:EASYVPN_ACCOUNT as $env:EASYVPN_USER"
     return
 }
+if (-not $env:EASYVPN_EWON) { throw 'Set "ewon" to the Ewon''s name as eCatcher lists it.' }
 
 $run = @('--program', $powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ui)
 

@@ -126,7 +126,8 @@ local.MapGet("/overview", (ConnectionController controller, FacilityCatalog cata
     updater.Status));
 local.MapPost("/update/check", (Updater updater, CancellationToken ct) => updater.CheckNowAsync(ct));
 local.MapPost("/update/install", (Updater updater) => updater.InstallNow());
-local.MapGet("/checks", (GatewayChecks checks, CancellationToken ct) => checks.RunAsync(ct));
+// What is known at once; ?refresh=true to check everything again, in the background.
+local.MapGet("/checks", (GatewayChecks checks, bool? refresh) => checks.Results(refresh == true));
 local.MapPost("/connect/{id}", (string id, ConnectionController controller) =>
     controller.Connect(id, desktop) ? Results.NoContent() : Results.NotFound());
 local.MapPost("/disconnect", (ConnectionController controller) =>

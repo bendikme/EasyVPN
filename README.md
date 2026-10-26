@@ -34,7 +34,11 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   in: it shares the adapter the facility's networks lead to - its VPN's - with the workstations,
   through Windows' Internet Connection Sharing. The networks are the facility's `routes`, or for a
   facility without any, those its VPN set up on the gateway while connecting (most VPN servers push
-  them then, rather than writing them into the profile).
+  them then, rather than writing them into the profile). Disconnecting leaves the VPN client's
+  adapter shared - leading nowhere once the client is down - so the next facility through the same
+  client (every Tosibox Lock goes through Tosi Client's) need not wait for Windows to share it
+  again, which can take half a minute; sharing goes when a facility fails, is interrupted, or does
+  not go down.
 - **Packets, not connections.** The agent keeps a Wintun adapter, `EasyVPN`, whose packets - ping
   as well as TCP and UDP - go to the gateway over a WebSocket on its API port, with the same access
   key and pinned certificate, one packet a message. The gateway's hub puts them out on its own
@@ -148,7 +152,11 @@ notification area of everyone who signs in to the gateway (and in the Start menu
   for administrator rights) and its certificate fingerprint, each a click from the clipboard;
 - every facility, and whether it is ready: its connector checks, without connecting anything, that
   its VPN client is installed and its settings are in place (the profile file is there, the
-  Windows VPN connection exists, …);
+  Windows VPN connection exists, …). The gateway checks in the background and keeps the answers,
+  checking a facility again only when it or its connector changes, after a day, or on *Check*, so
+  the app shows them at once and the gateway is left alone; facilities that go through the same
+  VPN client are checked once for all of them (every Tosibox Lock goes through the one Tosi
+  Client);
 - what the gateway itself lacks: the firewall rule, Internet Connection Sharing (the *Internet
   Connection Sharing (ICS)* service must not be disabled, nor sharing forbidden by group policy),
   and for Layer 2 OpenVPN, the *EasyVPN L2* adapter and its bridge, each with a button that fixes
@@ -199,7 +207,8 @@ by double-clicking, it starts the new one again afterwards.
 
 **The app** lives in the notification area, like DynatecRDM. A click on its icon (or `Ctrl+Alt+F`
 anywhere) opens the tray menu: a search box, then the facility connected - with what it is doing,
-and *Disconnect* - or the last one that could not be connected, and why; your favourites, the
+and *Disconnect* - or the last one that could not be connected, and why, and above it anything
+the gateway could not be asked (to disconnect, say); your favourites, the
 facilities you used lately, and every facility by group. A click on a facility only chooses it: it
 connects with its *Connect* button, shown on the facility under the mouse and on the one chosen.
 Closed groups say how many they hold, so a hundred Tosibox Locks take a line; with more than 15
@@ -392,7 +401,10 @@ with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EAS
 private folder for it). Exit code 0 is success; whatever it prints shows in the app's Activity.
 `<name>.ps1 Check` (without the password) must not connect anything: it says whether the facility
 could be connected from here, exit code 0 for ready, and what it prints shows in the gateway app.
-To add or adapt one, put it in `%ProgramData%\EasyVPN\Gateway\connectors\`, which wins over the
+A connector whose check reads only what its facilities share says so in lines before `param`:
+`#check-shared: program` names the settings the check reads, and facilities alike in those share
+one run; `#check-needs: lock` names those each facility must have, which the gateway checks itself.
+Without them, each facility is checked on its own. To add or adapt one, put it in `%ProgramData%\EasyVPN\Gateway\connectors\`, which wins over the
 shipped folder and survives updates.
 
 ## Layer 2 facilities

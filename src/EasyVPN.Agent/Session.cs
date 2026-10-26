@@ -97,6 +97,12 @@ public sealed class Session(Tunnel tunnel, Layer2Link layer2, RecentLog log) : B
         try
         {
             await Gateway().DisconnectAsync(ct);
+            log.Add("Asked the gateway to disconnect");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            log.Add($"The gateway could not be asked to disconnect: {Explain(ex)} The facility is gone from this PC; on the gateway it is still connected.");
+            throw;
         }
         finally
         {

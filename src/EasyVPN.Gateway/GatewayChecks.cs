@@ -1,47 +1,114 @@
 namespace EasyVPN.Gateway;
 
 /// <summary>
-/// What the gateway needs to do its job, checked when the EasyVPN Gateway app asks: the firewall
-/// letting workstations in, Internet Connection Sharing to share a VPN with them, each facility's
-/// VPN client and settings (asked of its connector), and for Layer 2 facilities a bridged
-/// "EasyVPN L2" adapter. Nothing here connects anything.
+/// What the gateway needs to do its job: the firewall letting workstations in, Internet Connection
+/// Sharing to share a VPN with them, each facility's VPN client and settings (asked of its
+/// connector), and for Layer 2 facilities a bridged "EasyVPN L2" adapter. Nothing here connects
+/// anything.
+///
+/// Checked here, in the background, at the gateway's own pace - a connector's check is a PowerShell
+/// script, run once for all its facilities alike (a hundred Tosibox Locks are one Tosi Client) - and
+/// kept: a facility is checked again only when it, its connector or what its connector's facilities
+/// share changes, or after a day; the gateway's own checks every few minutes. The EasyVPN Gateway app only reads what is
+/// known (<see cref="Results"/>), which takes no time, and asks for a fresh round with Refresh. A
+/// round once started is finished, whoever stops waiting for it.
 /// </summary>
-public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors, Sharing sharing, GatewaySettings settings)
+public sealed class GatewayChecks(FacilityCatalog catalog, Connectors connectors, Sharing sharing, GatewaySettings settings, RecentLog log) : IDisposable
 {
     /// <summary>The rule the installer makes.</summary>
     private const string FirewallRule = "EasyVPN Gateway";
 
-    private readonly SemaphoreSlim _running = new(1, 1);
+    private static readonly TimeSpan FacilityAge = TimeSpan.FromHours(24);
+    private static readonly TimeSpan SystemAge = TimeSpan.FromMinutes(10);
 
-    public async Task<IReadOnlyList<CheckResult>> RunAsync(CancellationToken ct)
+    private readonly Lock _sync = new();
+    private readonly Dictionary<string, (string Key, CheckResult Result, DateTime At)> _facilities = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CancellationTokenSource _stop = new();
+    private IReadOnlyList<CheckResult> _system = [];
+    private DateTime _systemAt = DateTime.MinValue;
+    private DateTime _fresh = DateTime.MinValue;
+    private Task? _round;
+
+    /// <summary>
+    /// What is known now, at once, and whether a round is under way. One starts, in the background,
+    /// when something is missing or old - or, with <paramref name="refresh"/>, to check everything again.
+    /// </summary>
+    public GatewayCheckRun Results(bool refresh)
     {
-        // One run at a time: each check is a PowerShell of its own.
-        await _running.WaitAsync(ct);
+        lock (_sync)
+        {
+            if (refresh) _fresh = DateTime.UtcNow;
+            var facilities = catalog.All();
+            if (_round is not { IsCompleted: false } && Due(facilities)) _round = Task.Run(RoundAsync);
+            return new GatewayCheckRun(
+                [.. _system, .. facilities.Select(f => _facilities.GetValueOrDefault(f.Id).Result).OfType<CheckResult>()],
+                _round is { IsCompleted: false });
+        }
+    }
+
+    public void Dispose() => _stop.Cancel();
+
+    // Under _sync.
+    private bool Due(IReadOnlyList<Facility> facilities) =>
+        SystemDue() || facilities.Any(f => FacilityDue(f, connectors.Fingerprint(f)));
+
+    private bool SystemDue() => _systemAt < DateTime.UtcNow - SystemAge || _systemAt < _fresh;
+
+    private bool FacilityDue(Facility facility, string key) =>
+        !_facilities.TryGetValue(facility.Id, out var known) || known.Key != key || known.At < DateTime.UtcNow - FacilityAge || known.At < _fresh;
+
+    /// <summary>
+    /// The checks due, in turn. The scripts run one at a time on a small machine - two processors -
+    /// and on a bigger one half as many at once as it has processors: the gateway has VPN clients to
+    /// drive, and they come first.
+    /// </summary>
+    private async Task RoundAsync()
+    {
+        var ct = _stop.Token;
         try
         {
             var facilities = catalog.All();
-            var results = new List<CheckResult> { Firewall() };
-            if (facilities.Any(f => !f.Layer2)) results.Add(await SharingAsync(ct));
-            if (facilities.Any(f => f.Layer2)) results.Add(await Layer2Async(ct));
+            bool system;
+            lock (_sync) system = SystemDue();
+            if (system)
+            {
+                var results = new List<CheckResult> { Firewall() };
+                if (facilities.Any(f => !f.Layer2)) results.Add(await SharingAsync(ct));
+                if (facilities.Any(f => f.Layer2)) results.Add(await Layer2Async(ct));
+                lock (_sync) (_system, _systemAt) = (results, DateTime.UtcNow);
+            }
 
-            using var few = new SemaphoreSlim(4);
-            results.AddRange(await Task.WhenAll(facilities.Select(async facility =>
+            // Facilities alike in what their connector's check reads share one run: a hundred Tosibox
+            // Locks are one Tosi Client, checked once.
+            List<(Facility Facility, string Key)> due;
+            lock (_sync) due = [.. facilities.Select(f => (f, connectors.Fingerprint(f))).Where(d => FacilityDue(d.f, d.Item2))];
+            using var few = new SemaphoreSlim(Math.Max(1, Environment.ProcessorCount / 2));
+            await Task.WhenAll(due.GroupBy(d => connectors.CheckGroup(d.Facility)).Select(async group =>
             {
                 await few.WaitAsync(ct);
                 try
                 {
-                    return await connectors.CheckAsync(facility, ct);
+                    var result = await connectors.CheckAsync(group.First().Facility, ct);
+                    var at = DateTime.UtcNow;
+                    lock (_sync)
+                    {
+                        foreach (var (facility, key) in group)
+                            _facilities[facility.Id] = (key, connectors.ForFacility(result, facility), at);
+                    }
                 }
                 finally
                 {
                     few.Release();
                 }
-            })));
-            return results;
+            }));
         }
-        finally
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _running.Release();
+            // The gateway is stopping.
+        }
+        catch (Exception ex)
+        {
+            log.Add($"Checking the facilities stopped: {ex.Message}");
         }
     }
 

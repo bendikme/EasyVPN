@@ -63,6 +63,7 @@ public sealed class TrayMenuViewModel : ObservableObject
     private readonly SectionRow _all = new("ALL FACILITIES");
     private readonly SectionRow _results = new("FOUND");
     private readonly MessageRow _message = new();
+    private readonly MessageRow _problem = new();
     private readonly MessageRow _more = new();
 
     /// <param name="confirmSwitch">Asked before connecting a facility while the gateway carries another (given, or null for none).</param>
@@ -276,6 +277,13 @@ public sealed class TrayMenuViewModel : ObservableObject
         var query = _search.Trim();
         var rows = new List<ListRow>();
         var facilities = _main.Facilities;
+
+        // What went wrong with the last thing asked - a disconnect the gateway was not told of - first.
+        if (_main.Error is { } error)
+        {
+            _problem.Text = error;
+            rows.Add(_problem);
+        }
 
         if (!_main.AgentOnline || !_main.Configured)
         {

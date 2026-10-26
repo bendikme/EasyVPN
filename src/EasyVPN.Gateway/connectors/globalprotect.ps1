@@ -20,11 +20,12 @@
         "C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --globalprotect dump > globalprotect.txt
     Check: GlobalProtect installed and its service running, and a portal set. It does not touch it.
 #>
+#check-shared:
+#check-needs: portal
 param([ValidateSet('Connect', 'Disconnect', 'Check')][string]$Action)
 $ErrorActionPreference = 'Stop'
 trap { Write-Output $_.Exception.Message; exit 1 }
 
-if (-not $env:EASYVPN_PORTAL) { throw 'Set "portal" to the portal''s address, as GlobalProtect lists it.' }
 $gateway = $env:EASYVPN_GATEWAY
 $app = Join-Path (Split-Path $gateway) 'EasyVPN.GatewayApp.exe'
 if (-not (Test-Path $app)) { throw "The EasyVPN Gateway app is not beside the gateway ($app)." }
@@ -39,9 +40,10 @@ if ($Action -eq 'Check') {
     $service = Get-Service PanGPS -ErrorAction SilentlyContinue
     if (-not $service) { throw 'GlobalProtect''s service (PanGPS) is not installed: install GlobalProtect again.' }
     if ($service.Status -ne 'Running') { throw "GlobalProtect's service (PanGPS) is $($service.Status.ToString().ToLower()): start it." }
-    Write-Output "GlobalProtect$(if ($installed.DisplayVersion) { " $($installed.DisplayVersion)" }) on the gateway's desktop, portal $env:EASYVPN_PORTAL"
+    Write-Output "GlobalProtect$(if ($installed.DisplayVersion) { " $($installed.DisplayVersion)" }) on the gateway's desktop"
     return
 }
+if (-not $env:EASYVPN_PORTAL) { throw 'Set "portal" to the portal''s address, as GlobalProtect lists it.' }
 
 # GlobalProtect's agent on any desktop; the connection itself is its service's, on its own adapter.
 $running = Get-Process PanGPA -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 }
