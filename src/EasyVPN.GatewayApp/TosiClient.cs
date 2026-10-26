@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Automation;
 using Microsoft.Win32;
+using static EasyVPN.GatewayApp.WindowDriver;
 
 namespace EasyVPN.GatewayApp;
 
@@ -146,7 +147,7 @@ public static partial class TosiClient
             }
 
             var before = state;
-            var clicked = Press(handle, Look(window), row, state);
+            var clicked = PressRow(handle, Look(window), row, state);
             say(connect ? $"Pressed Connect for {name} in Tosi Client{(clicked ? ", with the mouse, as it shows no button UI Automation sees" : "")}."
                 : state.Connecting ? $"Pressed {state.Button?.Name ?? "Cancel"} for {name}, which Tosi Client was still connecting."
                 : $"Pressed Disconnect for {name} in Tosi Client ({state.Why}).");
@@ -258,7 +259,7 @@ public static partial class TosiClient
             var state = Read(seen, line);
             if (!Surely(state)) continue;
             say($"Disconnecting {other} in Tosi Client ({state.Why}).");
-            Press(handle, seen, line, state);
+            PressRow(handle, seen, line, state);
             say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false }, Settle)
                 ? $"Tosi Client has disconnected {other}."
                 : $"Tosi Client did not show {other} disconnected within {Settle.TotalSeconds:0} s.");
@@ -590,51 +591,6 @@ public static partial class TosiClient
 
     // ---------------------------------------------------------------- what the window shows
 
-    /// <summary>One element of the window as it was when looked at.</summary>
-    private sealed record Seen(AutomationElement Element, string Name, ControlType Type, Rect Rect, bool Offscreen, bool Enabled, string Help,
-        bool ReadOnly = false, string Value = "")
-    {
-        public bool Visible => !Offscreen && !Rect.IsEmpty;
-    }
-
-    /// <summary>
-    /// Every element of the window, with what is needed of each fetched in one go: quick even when a
-    /// connected Lock lists a hundred devices, and steady while the client changes underneath.
-    /// </summary>
-    private static List<Seen> Look(AutomationElement window)
-    {
-        var cache = new CacheRequest { AutomationElementMode = AutomationElementMode.Full };
-        foreach (var property in new[] { AutomationElement.NameProperty, AutomationElement.ControlTypeProperty, AutomationElement.BoundingRectangleProperty,
-                     AutomationElement.IsOffscreenProperty, AutomationElement.IsEnabledProperty, AutomationElement.HelpTextProperty,
-                     ValuePattern.IsReadOnlyProperty, ValuePattern.ValueProperty })
-            cache.Add(property);
-        AutomationElementCollection all;
-        using (cache.Activate())
-            all = window.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
-        // Out of the window is out of view, whatever an element says of itself: a list scrolled past
-        // a row may still call it on screen.
-        var bounds = window.Current.BoundingRectangle;
-        var seen = new List<Seen>(all.Count);
-        foreach (AutomationElement e in all)
-        {
-            try
-            {
-                var c = e.Cached;
-                var rect = c.BoundingRectangle;
-                var inside = !rect.IsEmpty && bounds.Contains(new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2));
-                // A box's value and whether it takes typing, where it says.
-                var readOnly = e.GetCachedPropertyValue(ValuePattern.IsReadOnlyProperty, true) is true;
-                var value = e.GetCachedPropertyValue(ValuePattern.ValueProperty, true) as string ?? "";
-                seen.Add(new Seen(e, c.Name ?? "", c.ControlType, rect, c.IsOffscreen || !inside, c.IsEnabled, c.HelpText ?? "", readOnly, value));
-            }
-            catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException)
-            {
-                // Gone already.
-            }
-        }
-        return seen;
-    }
-
     /// <summary>Part of the list of Locks, shown: a row of it, a Connect button, or a Lock's status.</summary>
     private static bool Listed(Seen s) =>
         s.Visible && (s.Type == ControlType.TreeItem || s.Type == ControlType.DataItem || s.Type == ControlType.ListItem
@@ -707,7 +663,7 @@ public static partial class TosiClient
                 Click(handle, new Point(item.Rect.Left + Math.Min(40, item.Rect.Width / 2), item.Rect.Top + item.Rect.Height / 2));
                 if (GetForegroundWindow() == handle)
                 {
-                    Type(name);
+                    TypeText(name);
                     Seen? typed = null;
                     if (WaitUntil(() => (typed = Row(Look(window), name)) is not null, TimeSpan.FromSeconds(2))) return typed;
                 }
@@ -814,7 +770,7 @@ public static partial class TosiClient
 
     /// <summary>The row's button, or where the Connection column crosses the row when the client draws its buttons itself.</summary>
     /// <returns>True when it was a click with the mouse, rather than UI Automation's press.</returns>
-    private static bool Press(IntPtr window, List<Seen> seen, Seen row, State state)
+    private static bool PressRow(IntPtr window, List<Seen> seen, Seen row, State state)
     {
         if (state.Button is { } button && button.Element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
@@ -825,17 +781,6 @@ public static partial class TosiClient
             ?? throw new InvalidOperationException("Tosi Client shows no Connect button, and no Connection column to find one in.");
         Click(window, at);
         return true;
-    }
-
-    private static void Press(IntPtr window, AutomationElement button)
-    {
-        if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
-        {
-            ((InvokePattern)invoke).Invoke();
-            return;
-        }
-        var r = button.Current.BoundingRectangle;
-        Click(window, new Point(r.Left + r.Width / 2, r.Top + r.Height / 2));
     }
 
     /// <summary>The search box: one that says so, or else the box shown highest (and furthest right) in the window.</summary>
@@ -853,82 +798,6 @@ public static partial class TosiClient
         var boxes = seen.Where(s => s.Type == ControlType.Edit).Select(b =>
             $"\"{b.Name}\" holding \"{b.Value}\" at {b.Rect.Left:0},{b.Rect.Top:0}{(b.ReadOnly ? ", read-only" : "")}{(b.Visible ? "" : ", hidden")}").ToList();
         return boxes.Count == 0 ? "none" : string.Join("; ", boxes);
-    }
-
-    /// <summary>
-    /// Puts text in a box as a person does - a click into it, the text typed - as the client reacts
-    /// to typing alone (its OK button, its search). Typed only once its window is in front, so
-    /// nothing lands anywhere else, and read back where it can be. Otherwise put there through UI
-    /// Automation.
-    /// </summary>
-    /// <returns>True when typed, false when put there otherwise, null when neither would do.</returns>
-    private static bool? Enter(IntPtr window, AutomationElement box, string text)
-    {
-        try
-        {
-            Front(window);
-            // A click focuses the box as surely as a person's, and brings the window to the front
-            // with it; UI Automation's focus as well, should the click not get there.
-            var r = box.Current.BoundingRectangle;
-            if (!r.IsEmpty && !box.Current.IsOffscreen) TryClick(window, new Point(r.Left + Math.Min(r.Width - 4, Math.Max(8, r.Width / 2)), r.Top + r.Height / 2), hover: false);
-            if (GetForegroundWindow() != window) Front(window);
-            box.SetFocus();
-            if (GetForegroundWindow() == window)
-            {
-                SelectAll();
-                PressKey(0x08); // Backspace
-                Type(text);
-                if (ValueOf(box) is not { } now || now == text) return true;
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
-        {
-            // The desktop takes no typing (locked, or a disconnected Remote Desktop): the other way.
-        }
-        try
-        {
-            if (box.TryGetCurrentPattern(ValuePattern.Pattern, out var value) && !((ValuePattern)value).Current.IsReadOnly)
-            {
-                ((ValuePattern)value).SetValue(text);
-                return false;
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ElementNotEnabledException or COMException)
-        {
-            // Nor this.
-        }
-        return null;
-    }
-
-    /// <summary>What a box holds, when it can be read: not a password.</summary>
-    private static string? ValueOf(AutomationElement box)
-    {
-        try
-        {
-            return !box.Current.IsPassword && box.TryGetCurrentPattern(ValuePattern.Pattern, out var value) ? ((ValuePattern)value).Current.Value : null;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ElementNotAvailableException or COMException)
-        {
-            return null;
-        }
-    }
-
-    private static bool WaitUntil(Func<bool> done, TimeSpan within)
-    {
-        var deadline = DateTime.UtcNow + within;
-        while (true)
-        {
-            try
-            {
-                if (done()) return true;
-            }
-            catch (Exception ex) when (ex is ElementNotAvailableException or COMException)
-            {
-                // Changed while it was looked at: look again.
-            }
-            if (DateTime.UtcNow >= deadline) return false;
-            Thread.Sleep(250);
-        }
     }
 
     // ---------------------------------------------------------------- what it sees, written down
@@ -963,18 +832,6 @@ public static partial class TosiClient
         {
             return "";
         }
-    }
-
-    private static void Write(AutomationElement element, int depth, Action<string> say)
-    {
-        var c = element.Current;
-        var r = c.BoundingRectangle;
-        var patterns = string.Join(",", element.GetSupportedPatterns().Select(p => p.ProgrammaticName.Replace("PatternIdentifiers.Pattern", "")));
-        say($"{new string(' ', depth * 2)}{c.ControlType.ProgrammaticName.Replace("ControlType.", "")} \"{c.Name}\" id={c.AutomationId} class={c.ClassName} " +
-            $"rect={(r.IsEmpty ? "-" : $"{r.Left:0},{r.Top:0},{r.Width:0}x{r.Height:0}")}{(c.IsEnabled ? "" : " disabled")}{(c.IsOffscreen ? " offscreen" : "")} [{patterns}]");
-        if (depth > 25) return;
-        for (var child = TreeWalker.RawViewWalker.GetFirstChild(element); child is not null; child = TreeWalker.RawViewWalker.GetNextSibling(child))
-            Write(child, depth + 1, say);
     }
 
     // ---------------------------------------------------------------- Windows
@@ -1031,197 +888,4 @@ public static partial class TosiClient
         if (titles.Count == 0 && programs.Count == 0) return "";
         return $" Here: windows {(titles.Count > 0 ? string.Join(", ", titles.Distinct()) : "none")}; programs {(programs.Count > 0 ? string.Join(", ", programs) : "none")}.";
     }
-
-    /// <summary>A top-level window by its title, shown or not: the client may sit hidden in the notification area.</summary>
-    private static IntPtr FindWindow(Regex title)
-    {
-        var found = IntPtr.Zero;
-        EnumWindows((handle, _) =>
-        {
-            var text = new StringBuilder(256);
-            GetWindowText(handle, text, text.Capacity);
-            if (!title.IsMatch(text.ToString())) return true;
-            found = handle;
-            return false;
-        }, IntPtr.Zero);
-        return found;
-    }
-
-    /// <summary>
-    /// Shown, restored and in front, so the client lays out its list and takes typing. Windows lets
-    /// only the program in front give the front away, so this borrows its input for a moment.
-    /// </summary>
-    /// <returns>True when the window is in front.</returns>
-    private static bool Front(IntPtr handle)
-    {
-        if (!IsWindowVisible(handle) || IsIconic(handle)) ShowWindow(handle, 9 /* SW_RESTORE */);
-        var foreground = GetForegroundWindow();
-        if (foreground != handle)
-        {
-            var theirs = GetWindowThreadProcessId(foreground, IntPtr.Zero);
-            var ours = GetCurrentThreadId();
-            var attached = theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true);
-            try
-            {
-                BringWindowToTop(handle);
-                SetForegroundWindow(handle);
-            }
-            finally
-            {
-                if (attached) AttachThreadInput(ours, theirs, false);
-            }
-            Thread.Sleep(300);
-        }
-        return GetForegroundWindow() == handle;
-    }
-
-    /// <summary>
-    /// A click as a person makes it: the pointer moved there, a moment for it to be noticed - a
-    /// client that draws its own buttons may take a click only on one it has seen the pointer over -
-    /// then a press and, a moment later, a release.
-    /// </summary>
-    /// <param name="hover">The pointer kept there a moment first. A box takes a click without it.</param>
-    /// <exception cref="InvalidOperationException">Another window is over the window there: no click, as it would land on that.</exception>
-    private static void Click(IntPtr window, Point at, bool hover = true)
-    {
-        // Only ever on the client: brought to the front just before, and the click made only where
-        // Windows says it is the window there - otherwise it lands on whatever is in front.
-        Front(window);
-        if (!Over(window, at))
-        {
-            Thread.Sleep(300);
-            Front(window);
-            if (!Over(window, at))
-                throw new InvalidOperationException($"Another window is over Tosi Client where it was to be clicked ({at.X:0},{at.Y:0}), so nothing was clicked.");
-        }
-        SetCursorPos((int)at.X - 3, (int)at.Y);
-        Thread.Sleep(hover ? 50 : 20);
-        Send(Move(1, 0), Move(1, 0), Move(1, 0)); // arrives, as a hand's would
-        Thread.Sleep(hover ? 350 : 30);
-        Send(Mouse(0x0002)); // left down
-        Thread.Sleep(hover ? 90 : 40);
-        Send(Mouse(0x0004)); // left up
-        Thread.Sleep(hover ? 250 : 60);
-    }
-
-    /// <summary>Whether the window at a point on the screen is (part of) <paramref name="window"/>.</summary>
-    private static bool Over(IntPtr window, Point at) => GetAncestor(WindowFromPoint(new NativePoint { X = (int)at.X, Y = (int)at.Y }), 2 /* GA_ROOT */) == window;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X, Y;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr WindowFromPoint(NativePoint point);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetAncestor(IntPtr handle, uint flags);
-
-    private static Input Move(int dx, int dy) => new() { Type = 0, Union = new InputUnion { Mouse = new MouseInput { X = dx, Y = dy, Flags = 0x0001 } } };
-
-    private static void TryClick(IntPtr window, Point at, bool hover = true)
-    {
-        try
-        {
-            Click(window, at, hover);
-        }
-        catch (InvalidOperationException)
-        {
-            // No mouse to be had here; the other ways will do.
-        }
-    }
-
-    private static void SelectAll() => Send(Key(0x11, 0), Key(0x41, 0), Key(0x41, 2), Key(0x11, 2)); // Ctrl+A
-
-    private static void PressKey(ushort key) => Send(Key(key, 0), Key(key, 2));
-
-    /// <summary>Types text as it is, character by character.</summary>
-    private static void Type(string text)
-    {
-        if (text.Length > 0) Send([.. text.SelectMany(c => new[] { Unicode(c, 0), Unicode(c, 2) })]);
-        Thread.Sleep(200);
-    }
-
-    private static void Send(params Input[] inputs)
-    {
-        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length)
-            throw new InvalidOperationException("Windows did not take the keyboard or mouse input: the gateway's desktop must be signed in and unlocked for this.");
-    }
-
-    private static Input Mouse(uint flags) => new() { Type = 0, Union = new InputUnion { Mouse = new MouseInput { Flags = flags } } };
-    private static Input Key(ushort key, uint flags) => new() { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { Key = key, Flags = flags } } };
-    private static Input Unicode(char c, uint flags) => new() { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { Scan = c, Flags = flags | 0x0004 } } };
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Input
-    {
-        public uint Type;
-        public InputUnion Union;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
-        [FieldOffset(0)] public MouseInput Mouse;
-        [FieldOffset(0)] public KeyboardInput Keyboard;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MouseInput
-    {
-        public int X, Y;
-        public uint Data, Flags, Time;
-        public IntPtr Extra;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KeyboardInput
-    {
-        public ushort Key, Scan;
-        public uint Flags, Time;
-        public IntPtr Extra;
-    }
-
-    private delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetWindowText(IntPtr handle, StringBuilder text, int length);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowVisible(IntPtr handle);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr handle);
-
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr handle, int command);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr handle);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    private static extern bool BringWindowToTop(IntPtr handle);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr handle, IntPtr processId);
-
-    [DllImport("user32.dll")]
-    private static extern bool AttachThreadInput(uint attach, uint to, bool on);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint count, Input[] inputs, int size);
 }

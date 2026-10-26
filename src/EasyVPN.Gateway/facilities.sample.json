@@ -105,6 +105,26 @@
       "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
       "routes": [ "172.16.30.0/24" ],
       "check": "172.16.30.5:102"
+    },
+    {
+      "id": "havbruk-stord",
+      "name": "Stord",
+      "customer": "Havbruk Vest",
+      "connector": "globalprotect",
+      "settings": { "portal": "gp.havbruk.example", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "check": "10.70.1.10:102",
+      "notes": "GlobalProtect, On-demand. The portal sets up the plant's networks."
+    },
+    {
+      "id": "kyst-bodo",
+      "name": "Bodø",
+      "customer": "Kyst Mekaniske",
+      "connector": "forticlient",
+      "settings": { "tunnel": "Kyst Mekaniske", "user": "dynatec" },
+      "password": "dpapi:(run EasyVPN.Gateway.exe protect and paste the result here)",
+      "routes": [ "192.168.70.0/24" ],
+      "check": "192.168.70.10:102"
     }
   ]
 }

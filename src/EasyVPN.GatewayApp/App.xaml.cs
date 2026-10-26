@@ -9,7 +9,8 @@ namespace EasyVPN.GatewayApp;
 /// started at sign-in with <c>--tray</c>. Starting it again shows the running copy.
 /// <c>--access-key</c> is the app started again as administrator, to show the access key and nothing else;
 /// <c>--facilities [id]</c> the same for the facility editor, <c>--settings</c> for Settings. <c>--tosibox …</c> drives Tosi Client
-/// for the gateway's tosibox connector (<see cref="TosiClient"/>), with no window of its own.
+/// for the gateway's tosibox connector (<see cref="TosiClient"/>), and <c>--globalprotect …</c> GlobalProtect for its
+/// globalprotect connector (<see cref="GlobalProtect"/>), with no window of their own.
 /// </summary>
 public partial class App : Application
 {
@@ -55,6 +56,12 @@ public partial class App : Application
         {
             using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
             Shutdown(TosiClient.Run(tosibox, output.WriteLine));
+            return;
+        }
+        if (e.Args is ["--globalprotect", .. var globalProtect])
+        {
+            using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+            Shutdown(GlobalProtect.Run(globalProtect, output.WriteLine));
             return;
         }
 

@@ -274,9 +274,11 @@ has one of each kind.
 
 | Connector | VPN client | Settings |
 | --- | --- | --- |
-| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
+| `manual` | Any client: someone connects it on the gateway desktop (MFA, SAML, FortiClient before 7.4.6, SINEMA RC …). EasyVPN waits for the check, or for the networks the VPN sets up when `routes` is empty. | none |
 | `tosibox` | Tosi Client (once TOSIBOX Key), which has no command line: the EasyVPN Gateway app, started by the gateway in a desktop session, starts the client if need be, types its password if it asks, finds the Lock, presses Connect or Disconnect and waits until the client shows it. Its program and password are usually set once, in Settings. | `lock`, `program` |
 | `ecatcher` | Ewon eCatcher (Talk2M), which has no command line: the gateway drives it through its Java's accessibility bridge on a desktop session, signs in to Talk2M, finds the Ewon and connects it. Its account, user and password are usually set once, in Settings. | `ewon`, `account`, `user`, `program` |
+| `globalprotect` | Palo Alto Networks GlobalProtect, its own app, which has no command line on Windows: the EasyVPN Gateway app, started by the gateway in a desktop session, brings up its status panel, chooses the portal, presses Connect, signs in if it asks and waits until it shows Connected. The portal must let users disconnect (On-demand). | `portal`, `user` |
+| `forticlient` | FortiClient 7.4.6 or later, SSL VPN or IPsec, through `FortiVPN.exe --cli`: a tunnel already made in FortiClient | `tunnel`, `user`, `certificate` |
 | `windows` | The VPN built into Windows (IKEv2, SSTP, L2TP), dialled with `rasdial`. Create the connection with `Add-VpnConnection -AllUserConnection`. | `name`, `user` |
 | `openvpn` | OpenVPN 2.6+ community client. Sophos SSL VPN `.ovpn` profiles too, with no Sophos software. `legacy`: `true` allows certificates signed with SHA1 or with short RSA keys (`--tls-cert-profile insecure`), which OpenVPN 2.6 refuses otherwise. | `config`, `user`, `legacy` |
 | `wireguard` | WireGuard for Windows | `config` |
@@ -284,13 +286,13 @@ has one of each kind.
 | `sophos` | Sophos Connect, through `sccli`: IPsec (`.scx`) and provisioning (`.pro`) files | `config`, `connection`, `user` |
 | `netextender` | SonicWall NetExtender, through `nxcli` (or `NECLI` in 10.2 and earlier) | `host`, `domain`, `user`, `trust` |
 | `pulse` | Ivanti Secure Access / Pulse Secure, through `pulselauncher`. No second sign-in, no choice of role. | `url`, `realm`, `user` |
-| `openconnect` | OpenConnect, for GlobalProtect (and Pulse, Fortinet, F5, Array, AnyConnect) servers that sign in with a user name and password | `protocol`, `host`, `user`, `group`, `servercert` |
+| `openconnect` | OpenConnect, for GlobalProtect (and Pulse, Fortinet, F5, Array, AnyConnect) servers that sign in with a user name and password, without their own clients | `protocol`, `host`, `user`, `group`, `servercert` |
 
 All but `manual` sign in by themselves, with the facility's `user` and `password`: a sign-in that
 asks for a token or opens a browser needs `manual`, or a service account without one from the
 customer. Each script's header says what its settings mean. Each returns once its client says it is
 connected (OpenVPN's "Initialization Sequence Completed", Cisco's "state: Connected", Tosi Client's
-Disconnect button), so a facility needs no `check` to turn green.
+Disconnect button, FortiClient's "Connected"), so a facility needs no `check` to turn green.
 
 **Tosibox.** Someone must be at the gateway's desktop: set the gateway to sign in by itself. The
 gateway looks for Tosi Client only in the sessions someone is connected to, unlocked ones first
@@ -332,6 +334,37 @@ by hand once on the gateway, ticking *Remember this PC*. An offline Ewon that ca
 is left to a person. When it cannot go on, it saves what eCatcher showed to
 `%LOCALAPPDATA%\EasyVPN\ecatcher.txt`; `ecatcher-ui.ps1 Dump`, run as administrator in
 `C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` on the gateway's desktop, writes the same.
+
+**GlobalProtect.** GlobalProtect's app has no command line on Windows (only on Linux), so it is
+driven as Tosi Client is: by the EasyVPN Gateway app, in the session someone is at, unlocked first,
+through UI Automation and, where that does not reach, the mouse and keyboard. It brings up the
+status panel as a person would - starting GlobalProtect again, which shows the one running, or
+pressing its icon in the notification area - and starts its agent (`PanGPA.exe`) when it runs on
+no desktop. Then it chooses the facility's portal: typed into the portal box GlobalProtect shows
+the first time, or picked from its *Change Portal* drop-down. It presses Connect, and when
+GlobalProtect asks to sign in it types the facility's user name and password and presses Sign In:
+twice at most (the portal, then its gateway), never a third time, so a wrong password cannot lock
+the account. It waits until GlobalProtect shows Connected. Disconnecting presses Disconnect (Cancel,
+for one still connecting). The gateway is GlobalProtect's only user: connected to another portal,
+it is disconnected first. So that it can be, each portal must let users disconnect, which takes the
+*On-demand* connect method: ask the customer. Before relying on a facility, connect its portal by
+hand once on the gateway's desktop, so GlobalProtect has it in its list, and accept what it asks
+the first time (a certificate, terms of use). A portal that signs in in a browser (SAML) or asks
+for a code needs a person: `manual`. Leave `routes` empty: the portal sets up the networks on
+GlobalProtect's adapter (*PANGP Virtual Ethernet Adapter*). When it cannot read the panel, the app
+saves what it saw to `%LOCALAPPDATA%\EasyVPN\globalprotect.txt` and says so; `"C:\Program
+Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --globalprotect dump > globalprotect.txt` on the
+gateway's desktop writes the same.
+
+**FortiClient.** From 7.4.6, FortiClient connects and disconnects tunnels from its command line,
+`FortiVPN.exe --cli`, which the connector runs as the gateway does every connector, needing nobody
+at the desktop. It connects only tunnels already made in FortiClient (or pushed by the customer's
+EMS), so make each in FortiClient on the gateway and give the facility its name exactly as
+FortiClient lists it; *Check* in the gateway app says whether FortiClient lists it. The gateway is
+FortiClient's only user: another tunnel it has up is disconnected first. An older FortiClient has
+no command line, so its facilities are `manual`; and FortiClient 7.4.4 and later have no IPsec with
+IKEv1, which leaves such a tunnel to `manual` with an older FortiClient. OpenConnect
+(`protocol` `fortinet`) reaches FortiGate SSL VPNs without FortiClient.
 
 A connector is `connectors\<name>.ps1`, run as `<name>.ps1 Connect` or `<name>.ps1 Disconnect`,
 with the facility's settings in its environment plus `EASYVPN_FACILITY` and `EASYVPN_WORK` (a
@@ -455,8 +488,13 @@ UDP, a facility that stops answering and comes back, refusing a switch while the
 still answers, and disconnecting. Also the agent's pinning, API guards and connect flow up to routing,
 and the app against both. Creating the Wintun adapter and the routes needs the agent to run as a
 service (SYSTEM), as installed, and the vendor connectors need their VPN clients: try those on the
-real gateway, with `manual` first. The `sophos`, `netextender`, `pulse` and `openconnect`
-connectors follow their vendors' documented command lines but have not met a real server yet.
+real gateway, with `manual` first. The `sophos`, `netextender`, `pulse`, `openconnect` and
+`forticlient` connectors follow their vendors' documented command lines but have not met a real
+server yet; `forticlient` was run against a stand-in that prints what Fortinet documents.
+
+GlobalProtect: the driver builds, but has not yet met GlobalProtect, which was not to be had here;
+it goes by Palo Alto's description of the app (its *Connect*, *Change Portal*, *Username*,
+*Password* and *Sign In*). Try it on the gateway, and send `globalprotect.txt` when it stops.
 
 The facility editor: reading the sample and writing it back unchanged, a new facility's id,
 validation, switching connectors, passwords, links, a file changed in Notepad meanwhile and a file
