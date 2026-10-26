@@ -63,8 +63,9 @@ public static class DesktopSession
         }
 
         var tried = false;
-        foreach (var (session, active, locked) in Sessions())
+        foreach (var (session, connected, locked) in Sessions())
         {
+            var active = connected || ToConsole(session);
             if (usableOnly && !active) continue;
             if (!WTSQueryUserToken(session, out var token))
             {
@@ -154,6 +155,37 @@ public static class DesktopSession
         // Unlocked before locked: only a desktop someone could work at takes typing.
         var console = WTSGetActiveConsoleSessionId();
         return [.. sessions.OrderByDescending(s => s.Active).ThenBy(s => s.Locked).ThenByDescending(s => s.Session == console)];
+    }
+
+    /// <summary>
+    /// A desktop nobody is connected to - Remote Desktop closed without signing out - takes no clicks
+    /// or typing: Windows refuses them, so a VPN client there can be read but not pressed. Brought to
+    /// the gateway's console, as tscon does, it takes them again: still signed in, and unlocked, as it
+    /// is SYSTEM that moves it. Not when someone is signed in at the console, whose desktop it would
+    /// take; nor when run by hand, without the right to.
+    /// </summary>
+    private static bool ToConsole(uint session)
+    {
+        const int noToken = 1008;
+        var console = WTSGetActiveConsoleSessionId();
+        if (console == uint.MaxValue || console == session) return false;
+        if (WTSQueryUserToken(console, out var someone))
+        {
+            CloseHandle(someone);
+            return false;
+        }
+        if (Marshal.GetLastWin32Error() != noToken) return false;
+
+        if (!WTSConnectSession(session, console, "", true))
+        {
+            var why = new Win32Exception().Message;
+            Console.WriteLine($"{Describe(session)}'s desktop (session {session}) is disconnected, and could not be brought to the gateway's console ({why}): Windows takes no clicks or typing there.");
+            return false;
+        }
+        Console.WriteLine($"Brought {Describe(session)}'s desktop (session {session}) to the gateway's console: nobody was connected to it, and Windows takes no clicks or typing on a disconnected desktop.");
+        // The desktop takes a moment to be shown there, and to take input.
+        Thread.Sleep(TimeSpan.FromSeconds(2));
+        return true;
     }
 
     /// <summary>Whether a session's screen is locked, so nothing can be typed into it.</summary>
@@ -367,6 +399,9 @@ public static class DesktopSession
 
     [DllImport("kernel32.dll")]
     private static extern uint WTSGetActiveConsoleSessionId();
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool WTSConnectSession(uint session, uint target, string password, bool wait);
 
     [DllImport("wtsapi32.dll", SetLastError = true)]
     private static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr sessions, out int count);

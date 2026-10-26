@@ -55,6 +55,10 @@ public sealed class ConnectionController(
     private string? _vpn;
     private string? _fallback;
 
+    // The networks it carried then: what has to be gone once its VPN client has disconnected. Only
+    // touched while _busy is held.
+    private IReadOnlyList<string>? _vpnRoutes;
+
     // Why the hub would not start, said once. Only touched while _busy is held.
     private string? _hubProblem;
 
@@ -264,6 +268,7 @@ public sealed class ConnectionController(
         lock (_sync) routes = _routes ?? facility.Routes;
         var vpn = Sharing.Carrying(routes)
             ?? throw new InvalidOperationException($"This gateway has no route to {string.Join(", ", routes)} to share with the workstations.");
+        _vpnRoutes = routes;
         // Shared already, while its networks were coming in.
         if (_sharedAt == hub.Launches && _sharedAdapter == vpn.Id) return;
         await ShareAsync(vpn, ct);
@@ -304,13 +309,16 @@ public sealed class ConnectionController(
     private async Task<bool> TearDownAsync(int request)
     {
         await CloseWayInAsync();
-        (_vpn, _fallback) = (null, null);
-        if (_up is not { } facility) return true;
+        if (_up is not { } facility)
+        {
+            (_vpn, _fallback, _vpnRoutes) = (null, null, null);
+            return true;
+        }
 
-        await connectors.RunAsync(facility, "Disconnect", CancellationToken.None, line => Progress(request, line));
+        var code = await connectors.RunAsync(facility, "Disconnect", CancellationToken.None, line => Progress(request, line));
+        var deadline = DateTime.UtcNow + CleanupWait;
         if (facility.Check is { } check)
         {
-            var deadline = DateTime.UtcNow + CleanupWait;
             while (await Probe.TcpAsync(check, CancellationToken.None))
             {
                 if (DateTime.UtcNow >= deadline)
@@ -322,6 +330,24 @@ public sealed class ConnectionController(
                 await Task.Delay(TimeSpan.FromSeconds(2));
             }
         }
+        else if (_vpn is { } vpn && _vpnRoutes is { Count: > 0 } routes && vpn != Sharing.Carrying(["1.1.1.1/32"])?.Id)
+        {
+            // Without a check, its networks going from its VPN is what says it is down. A VPN client
+            // that was not made to disconnect - on a desktop that took no clicks, say - still carries
+            // them, and the next facility, often on the same addresses, must not go up on top of it.
+            // (A facility the gateway reaches through its own network, not a VPN, has nothing to go.)
+            while (Sharing.Carrying(routes) is { OperationalStatus: System.Net.NetworkInformation.OperationalStatus.Up } still && still.Id == vpn)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    Set(request, ConnectionState.Failed,
+                        $"{facility.Name} is still connected on the gateway: its VPN still carries {string.Join(", ", routes)}{(code != 0 ? $", and its {facility.Connector} connector failed (exit code {code})" : "")}. Disconnect it in its VPN client on the gateway, or disconnect again here.");
+                    return false;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+        }
+        (_vpn, _fallback, _vpnRoutes) = (null, null, null);
         _up = null;
         return true;
     }
