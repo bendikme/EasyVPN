@@ -3,12 +3,15 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace EasyVPN;
 
 /// <summary>
-/// The notification-area icon: the connection at a glance in its tooltip, the tray menu - every
-/// facility, searchable - on a click, and the window, Settings and Exit on a right-click.
+/// The notification-area icon: the connection at a glance in its colour (amber and breathing
+/// while connecting, green connected, red when it went wrong) and its tooltip, Windows
+/// notifications when it changes, the tray menu - every facility, searchable - on a click, and
+/// the window, Settings and Exit on a right-click.
 /// </summary>
 public sealed class TrayIcon : IDisposable
 {
@@ -21,6 +24,10 @@ public sealed class TrayIcon : IDisposable
     private readonly Action _open;
     private readonly Action _settings;
     private readonly Action _exit;
+    private readonly Notices _notices = new();
+    private readonly DispatcherTimer _breath = new() { Interval = TimeSpan.FromMilliseconds(150) };
+    private TrayLook _look = TrayLook.Idle;
+    private int _frame;
 
     public TrayIcon(MainViewModel model, TrayMenuWindow popup, Action open, Action settings, Action exit)
     {
@@ -30,10 +37,9 @@ public sealed class TrayIcon : IDisposable
         _settings = settings;
         _exit = exit;
 
-        using var stream = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/easyvpn.ico")).Stream;
         _icon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = new System.Drawing.Icon(stream, System.Windows.Forms.SystemInformation.SmallIconSize),
+            Icon = TrayIcons.Get(TrayLook.Idle),
             Text = "EasyVPN",
             Visible = true,
         };
@@ -50,7 +56,28 @@ public sealed class TrayIcon : IDisposable
             var at = System.Windows.Forms.Cursor.Position;
             _popup.ShowAt(at.X, at.Y, fromTray: true);
         };
-        model.PropertyChanged += (_, _) => _icon.Text = model.TrayText.Length > 127 ? model.TrayText[..127] : model.TrayText;
+        // A notification clicked: the window, at the facility it was about.
+        _icon.BalloonTipClicked += (_, _) =>
+        {
+            if (_model.Active is { } facility) _model.Show(facility);
+            _open();
+        };
+        _breath.Tick += (_, _) =>
+        {
+            _frame = (_frame + 1) % TrayIcons.BusyFrames;
+            _icon.Icon = TrayIcons.Get(TrayLook.Busy, _frame);
+        };
+
+        model.PropertyChanged += (_, _) =>
+        {
+            _icon.Text = model.TrayText.Length > 127 ? model.TrayText[..127] : model.TrayText;
+            Show(model.TrayLook);
+        };
+        model.Polled += () =>
+        {
+            foreach (var notice in _notices.Next(model.Connection, model.AskedRecently))
+                if (model.User.Notifications) Notify(notice);
+        };
     }
 
     /// <summary>The tray menu beside the mouse, as the shortcut opens it; or away, when it is up.</summary>
@@ -66,6 +93,28 @@ public sealed class TrayIcon : IDisposable
         // Clicking the icon took the focus from the popup, which put it away; the same click must not bring it back.
         if (Environment.TickCount64 - _popup.LastHiddenTicks < ReopenGuardMs) return;
         _popup.ShowAt(at.X, at.Y, fromTray);
+    }
+
+    private void Show(TrayLook look)
+    {
+        if (look == _look) return;
+        _look = look;
+        _frame = 0;
+        _icon.Icon = TrayIcons.Get(look);
+        if (look == TrayLook.Busy) _breath.Start();
+        else _breath.Stop();
+    }
+
+    private void Notify(Notice notice)
+    {
+        var level = notice.Level switch
+        {
+            NoticeLevel.Error => System.Windows.Forms.ToolTipIcon.Error,
+            NoticeLevel.Warning => System.Windows.Forms.ToolTipIcon.Warning,
+            _ => System.Windows.Forms.ToolTipIcon.Info,
+        };
+        // Windows shows it as a notification from EasyVPN, and keeps it in the notification centre.
+        _icon.ShowBalloonTip(5000, notice.Title, notice.Text, level);
     }
 
     private void ShowMenu()
@@ -86,6 +135,7 @@ public sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        _breath.Stop();
         _icon.Visible = false;
         _icon.Dispose();
     }

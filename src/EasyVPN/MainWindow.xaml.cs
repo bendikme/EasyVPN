@@ -56,7 +56,7 @@ public partial class MainWindow : Window
             open.Activate();
             return;
         }
-        var dialog = new SettingsWindow(_agent) { Owner = this };
+        var dialog = new SettingsWindow(_agent, _model.User) { Owner = this };
         if (dialog.ShowDialog() == true) await _model.ReloadAsync();
     }
 

@@ -26,6 +26,7 @@ public sealed class MainViewModel : ObservableObject
     private DateTime _loaded = DateTime.MinValue;
     private bool _polling;
     private bool _updating;
+    private DateTime _askedAt = DateTime.MinValue;
     private bool _moreActivity;
     private ListRow? _selectedRow;
     private string? _activeId;
@@ -92,6 +93,9 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>The agent is about to install an update, which replaces this app too.</summary>
     public event Action? UpdateInstalling;
+
+    /// <summary>After each look at the agent: the connection may have changed.</summary>
+    public event Action? Polled;
 
     public string SearchText
     {
@@ -295,8 +299,30 @@ public sealed class MainViewModel : ObservableObject
         ConnectionState.Connected => $"EasyVPN: connected to {Active?.Name}",
         ConnectionState.Connecting => $"EasyVPN: connecting to {Active?.Name}",
         ConnectionState.Interrupted => $"EasyVPN: {Active?.Name} interrupted",
+        ConnectionState.Disconnecting => $"EasyVPN: disconnecting {Active?.Name}",
+        ConnectionState.Failed => $"EasyVPN: could not connect to {Active?.Name}",
+        _ when Configured && !GatewayOnline => "EasyVPN: the gateway is not answering",
         _ => "EasyVPN",
     };
+
+    /// <summary>The tray icon's colour: grey when nothing can connect, amber while connecting, green connected, red when it went wrong.</summary>
+    public TrayLook TrayLook => State switch
+    {
+        _ when !_agentOnline => TrayLook.Off,
+        // Not asked yet.
+        _ when _status is null => TrayLook.Idle,
+        ConnectionState.Connecting or ConnectionState.Disconnecting => TrayLook.Busy,
+        ConnectionState.Connected => TrayLook.Connected,
+        ConnectionState.Interrupted or ConnectionState.Failed => TrayLook.Problem,
+        _ when !Configured || !GatewayOnline => TrayLook.Off,
+        _ => TrayLook.Idle,
+    };
+
+    /// <summary>The connection as the last poll saw it, for the notifications.</summary>
+    public ConnectionView Connection => new(_agentOnline, State, _status?.FacilityId, Active?.Name, StatusMessage);
+
+    /// <summary>This app asked to connect or disconnect within the last minute: what follows is no news to this user.</summary>
+    public bool AskedRecently => DateTime.UtcNow - _askedAt < TimeSpan.FromMinutes(1);
 
     // ---------------------------------------------------------------- work
 
@@ -342,6 +368,7 @@ public sealed class MainViewModel : ObservableObject
 
             UpdateStates();
             OnPropertyChanged(string.Empty);
+            Polled?.Invoke();
         }
         finally
         {
@@ -374,6 +401,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (facility is null) return;
         Selected = facility;
+        _askedAt = DateTime.UtcNow;
         await Try(() => _agent.ConnectAsync(facility.Id));
         if (Error is null) _user.Used(facility.Id);
         await PollAsync();
@@ -381,6 +409,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task DisconnectAsync()
     {
+        _askedAt = DateTime.UtcNow;
         await Try(_agent.DisconnectAsync);
         await PollAsync();
     }

@@ -220,6 +220,16 @@ public sealed class GatewayViewModel : ObservableObject
         var n => $"{n} things need attention",
     };
 
+    /// <summary>The tray icon's colour, as on the workstations: grey without the service, amber while connecting, green connected, red when it went wrong.</summary>
+    public TrayLook TrayLook => State switch
+    {
+        _ when !_serviceOnline => TrayLook.Off,
+        ConnectionState.Connecting or ConnectionState.Disconnecting => TrayLook.Busy,
+        ConnectionState.Connected => TrayLook.Connected,
+        ConnectionState.Interrupted or ConnectionState.Failed => TrayLook.Problem,
+        _ => TrayLook.Idle,
+    };
+
     public string TrayText => State switch
     {
         _ when !_serviceOnline => "EasyVPN Gateway: the service is not running",

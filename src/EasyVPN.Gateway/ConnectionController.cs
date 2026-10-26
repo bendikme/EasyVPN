@@ -13,8 +13,9 @@ namespace EasyVPN.Gateway;
 /// Taking a facility down is only done once its check has stopped answering. Two facilities often
 /// use the same addresses, and a VPN left up underneath would quietly take the next one's traffic.
 ///
-/// While connected the facility is checked every few seconds. When it stops answering, the way in
-/// closes until it answers again, so client traffic is blocked rather than sent some other way.
+/// While connected the facility is watched every few seconds: its VPN must still carry its networks,
+/// and its check, if it has one, answer. When either stops, the way in closes until it is back, so
+/// client traffic is blocked rather than sent some other way.
 ///
 /// A routed facility without routes of its own gets the networks its VPN sets up while connecting
 /// (<see cref="VpnRoutes"/>): clients route those, and the adapter they lead to is the one shared.
@@ -47,6 +48,12 @@ public sealed class ConnectionController(
 
     // The adapter shared then, by its id. Only touched while _busy is held.
     private string? _sharedAdapter;
+
+    // The VPN's adapter, by its id: where the facility's networks led when it was shared, kept while
+    // it is interrupted. And while they lead somewhere else - its VPN gone - where that is. Only
+    // touched while _busy is held.
+    private string? _vpn;
+    private string? _fallback;
 
     // Why the hub would not start, said once. Only touched while _busy is held.
     private string? _hubProblem;
@@ -269,7 +276,7 @@ public sealed class ConnectionController(
         // Marked first, so a share that fails halfway is undone all the same, and tried again.
         (_sharedAt, _sharedAdapter) = (-1, null);
         await sharing.ShareAsync(vpn, ct);
-        (_sharedAt, _sharedAdapter) = (launch, vpn.Id);
+        (_sharedAt, _sharedAdapter, _vpn, _fallback) = (launch, vpn.Id, vpn.Id, null);
     }
 
     /// <summary>Waits for a task, whatever came of it.</summary>
@@ -297,6 +304,7 @@ public sealed class ConnectionController(
     private async Task<bool> TearDownAsync(int request)
     {
         await CloseWayInAsync();
+        (_vpn, _fallback) = (null, null);
         if (_up is not { } facility) return true;
 
         await connectors.RunAsync(facility, "Disconnect", CancellationToken.None, line => Progress(request, line));
@@ -387,13 +395,13 @@ public sealed class ConnectionController(
                     }
                 }
 
-                if (facility?.Check is not { } check || state is not (ConnectionState.Connected or ConnectionState.Interrupted))
+                if (facility is null || state is not (ConnectionState.Connected or ConnectionState.Interrupted))
                 {
                     misses = 0;
                     continue;
                 }
 
-                if (await Probe.TcpAsync(check, stop))
+                if (await ProblemAsync(facility, state, stop) is not { } problem)
                 {
                     misses = 0;
                     if (state == ConnectionState.Interrupted)
@@ -412,7 +420,7 @@ public sealed class ConnectionController(
                 else if (state == ConnectionState.Connected && ++misses >= MissesBeforeInterrupted)
                 {
                     await CloseWayInAsync();
-                    Set(request, ConnectionState.Interrupted, $"{check} stopped answering. Traffic is blocked until it answers again.");
+                    Set(request, ConnectionState.Interrupted, problem);
                 }
             }
             finally
@@ -420,6 +428,33 @@ public sealed class ConnectionController(
                 _busy.Release();
             }
         }
+    }
+
+    /// <summary>
+    /// Why a connected facility cannot be reached now, or null when it can. Its VPN must still carry
+    /// its networks - they lead into the VPN's adapter, and it is up - which is watched for every
+    /// routed facility, so one without a check is not taken to be connected after its VPN client
+    /// lost the connection (a Tosibox Lock gone from Tosi Client takes its networks with it). And
+    /// its check, when it has one, must answer.
+    /// </summary>
+    private async Task<string?> ProblemAsync(Facility facility, ConnectionState state, CancellationToken ct)
+    {
+        if (!facility.Layer2 && _vpn is { } vpn)
+        {
+            IReadOnlyList<string> routes;
+            lock (_sync) routes = _routes ?? facility.Routes;
+            var now = Sharing.Carrying(routes);
+            var up = now?.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up;
+            // Where the networks lead while the VPN is gone - the internet's adapter, most often - so
+            // a VPN back on another adapter of its own is told apart from that.
+            if (state == ConnectionState.Connected) _fallback = up && now!.Id == vpn ? null : now?.Id;
+            var carried = up && (now!.Id == vpn || (state == ConnectionState.Interrupted && _fallback is not null && now.Id != _fallback));
+            if (!carried)
+                return $"{facility.Name}'s VPN no longer carries its networks: its VPN client lost the connection. Traffic is blocked until it is back.";
+        }
+        if (facility.Check is { } check && !await Probe.TcpAsync(check, ct))
+            return $"{check} stopped answering. Traffic is blocked until it answers again.";
+        return null;
     }
 
     /// <summary>

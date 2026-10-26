@@ -20,6 +20,9 @@ public sealed class UserSettings
     /// <summary>Groups this user opened or closed, by path. One never touched follows <see cref="FacilityTree.OpenUpTo"/>.</summary>
     public Dictionary<string, bool> Groups { get; set; } = [];
 
+    /// <summary>Windows notifications when the connection changes: connected, interrupted, failed, disconnected by someone else.</summary>
+    public bool Notifications { get; set; } = true;
+
     /// <summary>The shortcut that opens the tray menu from anywhere, as DynatecRDM's Ctrl+Alt+R does. Empty for none.</summary>
     public string Hotkey { get; set; } = "Ctrl+Alt+F";
 

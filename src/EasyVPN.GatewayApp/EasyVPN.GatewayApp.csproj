@@ -28,7 +28,7 @@
        and the gateway's password encryption and facility, so the facility editor writes what the
        gateway reads. -->
   <ItemGroup>
-    <Compile Include="..\EasyVPN\ObservableObject.cs;..\EasyVPN\ThemeService.cs;..\EasyVPN\VisibilityConverter.cs;..\EasyVPN\UpdateRestart.cs;..\EasyVPN\WindowFrame.cs" Link="Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\EasyVPN\ObservableObject.cs;..\EasyVPN\ThemeService.cs;..\EasyVPN\VisibilityConverter.cs;..\EasyVPN\UpdateRestart.cs;..\EasyVPN\WindowFrame.cs;..\EasyVPN\TrayIcons.cs" Link="Shared\%(Filename)%(Extension)" />
     <Compile Include="..\EasyVPN.Gateway\Secret.cs;..\EasyVPN.Gateway\Facility.cs;..\EasyVPN.Gateway\SharedSettings.cs" Link="Shared\%(Filename)%(Extension)" />
     <Page Include="..\EasyVPN\Themes\*.xaml" Link="Themes\%(Filename)%(Extension)" />
     <Resource Include="..\EasyVPN\Assets\easyvpn.ico" Link="Assets\easyvpn.ico" />

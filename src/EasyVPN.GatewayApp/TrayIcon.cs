@@ -3,12 +3,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace EasyVPN.GatewayApp;
 
 /// <summary>
-/// The notification-area icon: the gateway at a glance in its tooltip, and the window a click
-/// away. The menu is a WPF menu, so it wears the app's theme.
+/// The notification-area icon: the gateway at a glance in its colour and its tooltip, and the
+/// window a click away. The menu is a WPF menu, so it wears the app's theme.
 /// </summary>
 public sealed class TrayIcon : IDisposable
 {
@@ -16,6 +17,9 @@ public sealed class TrayIcon : IDisposable
     private readonly GatewayViewModel _model;
     private readonly Action _open;
     private readonly Action _exit;
+    private readonly DispatcherTimer _breath = new() { Interval = TimeSpan.FromMilliseconds(150) };
+    private TrayLook _look = TrayLook.Idle;
+    private int _frame;
 
     public TrayIcon(GatewayViewModel model, Action open, Action exit)
     {
@@ -23,10 +27,9 @@ public sealed class TrayIcon : IDisposable
         _open = open;
         _exit = exit;
 
-        using var stream = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/easyvpn.ico")).Stream;
         _icon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = new System.Drawing.Icon(stream, System.Windows.Forms.SystemInformation.SmallIconSize),
+            Icon = TrayIcons.Get(TrayLook.Idle),
             Text = "EasyVPN Gateway",
             Visible = true,
         };
@@ -35,7 +38,27 @@ public sealed class TrayIcon : IDisposable
             if (e.Button == System.Windows.Forms.MouseButtons.Left) _open();
             else if (e.Button == System.Windows.Forms.MouseButtons.Right) ShowMenu();
         };
-        model.PropertyChanged += (_, _) => _icon.Text = model.TrayText.Length > 127 ? model.TrayText[..127] : model.TrayText;
+        _breath.Tick += (_, _) =>
+        {
+            _frame = (_frame + 1) % TrayIcons.BusyFrames;
+            _icon.Icon = TrayIcons.Get(TrayLook.Busy, _frame);
+        };
+        model.PropertyChanged += (_, _) =>
+        {
+            _icon.Text = model.TrayText.Length > 127 ? model.TrayText[..127] : model.TrayText;
+            Show(model.TrayLook);
+        };
+    }
+
+    /// <summary>The connection's colour; amber breathes while it connects.</summary>
+    private void Show(TrayLook look)
+    {
+        if (look == _look) return;
+        _look = look;
+        _frame = 0;
+        _icon.Icon = TrayIcons.Get(look);
+        if (look == TrayLook.Busy) _breath.Start();
+        else _breath.Stop();
     }
 
     private void ShowMenu()
@@ -53,6 +76,7 @@ public sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        _breath.Stop();
         _icon.Visible = false;
         _icon.Dispose();
     }

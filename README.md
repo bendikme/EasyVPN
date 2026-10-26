@@ -51,9 +51,13 @@ WORKSTATION                                   GATEWAY (a VM or a small PC)
   and its check, if it has one, answers from the gateway; the agent when the workstation reaches the
   gateway's relay, and the check through the tunnel. Meanwhile the app shows each step as it
   happens - what the connector does, and every 15 s that it is still waiting for a VPN client.
-- **It fails closed.** If a facility with a check stops answering, the gateway stops sharing its VPN
-  until it answers again, so traffic stops rather than going some other way. The workstation keeps its
-  routes until you disconnect. Connecting another facility is refused while the previous one still
+- **It fails closed.** While a facility is connected the gateway watches it every 10 s: its VPN must
+  still carry its networks (they lead into the VPN's adapter, and it is up), and its check, if it has
+  one, answer. So a VPN client that loses the connection by itself - a Tosibox Lock gone from Tosi
+  Client, an OpenVPN tunnel down - is noticed with or without a check. After two misses the facility
+  is *Interrupted*: the gateway stops sharing its VPN, so traffic stops rather than going some other
+  way, and the workstations are told. When it is back (on the same adapter or a new one) it is
+  shared again and *Connected*. The workstation keeps its routes until you disconnect. Connecting another facility is refused while the previous one still
   answers, because two customers often use the same addresses (`192.168.0.10` at both) and a VPN
   left up underneath would quietly take the other one's traffic.
 - **Layer 2 when the VPN has it.** A facility whose VPN gives the gateway its Ethernet (a Tosibox
@@ -187,6 +191,12 @@ those of DynatecRDM's quick launch: ↑ ↓ (Page Up, Page Down) to choose, → 
 group, Enter to connect, Delete to disconnect, Esc to close. Connecting another facility while the
 gateway carries one asks first, since it disconnects it for every workstation. The window (*Open
 EasyVPN*, or a right-click on the icon) has the same list, the facility's details and its activity.
+The icon shows the connection in its colour: amber and breathing while it connects, green with a
+tick when connected, red with an exclamation mark when it is interrupted or failed, grey when the
+agent or the gateway cannot be reached. A Windows notification says when a facility is connected,
+interrupted, back, or could not be connected, and when someone else's switch disconnects yours - not
+what you did yourself (Settings turns them off). The gateway app's icon shows its connection the
+same way.
 The shortcut is set in `%LOCALAPPDATA%\EasyVPN\app.json` (`"hotkey": "Ctrl+Alt+F"`, or `""` for none).
 
 **A development build.** `publish.ps1`'s folders carry install scripts instead. Copy
@@ -256,7 +266,7 @@ has one of each kind.
 | `routes` | The facility's networks, in CIDR. Workstations route these, and only these, to the gateway, which shares the adapter they lead to (its VPN's) with them. Left out, they are the networks the VPN sets up on the gateway when it connects: the IPv4 routes that appear on its own adapter, without host routes for the adapter itself and anything wider than /8. Connecting fails if there are none. |
 | `layer2` | `true` for a facility whose VPN gives the gateway Layer 2: see [Layer 2 facilities](#layer-2-facilities). It needs no `routes`. |
 | `dns` | Names under `domains` resolve through `servers` while connected. Optional. |
-| `check` | Optional. `host:port` inside the facility that answers when it is reachable. With one, connected also means the plant answers, a plant that stops answering is noticed (and its traffic blocked), and switching confirms the previous facility is really down. Without one, connected is when the connector says its VPN client is connected. |
+| `check` | Optional. `host:port` inside the facility that answers when it is reachable. With one, connected also means the plant answers, a plant that stops answering is noticed (and its traffic blocked), and switching confirms the previous facility is really down. Without one, connected is when the connector says its VPN client is connected, and only the VPN is watched: a VPN that stays up while the plant behind it is unreachable goes unnoticed. |
 | `timeout` | Seconds to wait for the check, or the networks the VPN sets up, after the connector has run (default 120); allow time to sign in for `manual`. |
 | `links` | Buttons in the app: `https://…` opens the browser, `rdp://host` opens Remote Desktop. |
 
