@@ -26,8 +26,13 @@ public sealed class Connectors(RecentLog log)
     private readonly Dictionary<string, (DateTime Changed, (string[]? Reads, string[] Needs) Shape)> _shapes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="progress">Told each line the script prints, as it prints it.</param>
+    /// <param name="fresh">
+    /// Connect only: the gateway learns the VPN's networks from what appears while it connects, and
+    /// knows none from before, so it must see the VPN come up. The connector gets EASYVPN_FRESH=1:
+    /// one that finds its VPN up already takes it down and connects it again.
+    /// </param>
     /// <returns>The script's exit code: 0 for success.</returns>
-    public async Task<int> RunAsync(Facility facility, string action, CancellationToken ct, Action<string>? progress = null)
+    public async Task<int> RunAsync(Facility facility, string action, CancellationToken ct, Action<string>? progress = null, bool fresh = false)
     {
         var script = Find(facility.Connector);
         if (script is null)
@@ -37,6 +42,7 @@ public sealed class Connectors(RecentLog log)
         }
 
         var environment = EnvironmentOf(facility);
+        if (fresh) environment["EASYVPN_FRESH"] = "1";
         if (Password(facility) is { } password)
         {
             try

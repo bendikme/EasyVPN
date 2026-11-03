@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -18,14 +19,17 @@ namespace EasyVPN.GatewayApp;
 /// wait until the client shows it so. Through UI Automation where the client offers it, and with
 /// the mouse and keyboard where it does not - which needs the session's screen unlocked.
 ///
-///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]" [--start]   the password in EASYVPN_PASSWORD
+///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]" [--start] [--fresh]   the password in EASYVPN_PASSWORD
 ///   EasyVPN.GatewayApp.exe --tosibox disconnect "Tosibox 15 [Plant]"
 ///   EasyVPN.GatewayApp.exe --tosibox dump > tosi.txt                     what it sees of the client
+///   EasyVPN.GatewayApp.exe --tosibox watch "Tosibox 15 [Plant]" [seconds]  what it shows of the Lock, as it changes
 ///
 /// With --start, a client that shows no window here is started: from EASYVPN_PROGRAM, or from
 /// wherever Windows keeps track of it. Started again, a running one that sits in the notification
-/// area shows itself. When the Lock cannot be found or read, what was seen of the client is saved
-/// to <see cref="DumpPath"/>, and said.
+/// area shows itself. With --fresh (or EASYVPN_FRESH=1, from the gateway), a Lock connected
+/// already is disconnected and connected again: the gateway learns its networks from what appears
+/// while it connects. When the Lock cannot be found or read, what was seen of the client is saved
+/// to <see cref="DumpPath"/>, with a picture of the screen beside it, and said.
 /// </summary>
 public static partial class TosiClient
 {
@@ -41,37 +45,59 @@ public static partial class TosiClient
 
     public static string DumpPath { get; } = Path.Combine(Path.GetDirectoryName(CrashLog.Path)!, "tosi-client.txt");
 
+    // A window that changes while it is read - just started, shown from the notification area,
+    // redrawn - makes UI Automation fail now and then: looked at again, a few times, before giving up.
+    private const int Attempts = 3;
+
     public static int Run(string[] args, Action<string> say)
     {
         var password = Environment.GetEnvironmentVariable("EASYVPN_PASSWORD");
-        try
+        var fresh = Environment.GetEnvironmentVariable("EASYVPN_FRESH") == "1";
+        for (var attempt = 1; ; attempt++)
         {
-            return args switch
+            try
             {
-                ["connect", var name, .. var options] => Switch(name.Trim(), connect: true, password, options.Contains("--start"), say),
-                ["disconnect", var name] => Switch(name.Trim(), connect: false, password, start: false, say),
-                ["dump"] => Dump(say),
-                _ => Usage(say),
-            };
-        }
-        catch (Exception ex)
-        {
-            // Never a crash: said, and written down whole.
-            CrashLog.Write(ex, "driving Tosi Client");
-            say($"Tosi Client could not be driven ({ex.GetType().Name}: {ex.Message}).{Saved()} The details are in {CrashLog.Path} on the gateway.");
-            return 1;
+                return args switch
+                {
+                    ["connect", var name, .. var options] => Switch(name.Trim(), connect: true, password, options.Contains("--start"), fresh || options.Contains("--fresh"), say),
+                    ["disconnect", var name] => Switch(name.Trim(), connect: false, password, start: false, fresh: false, say),
+                    ["dump"] => Dump(say),
+                    ["watch", var name, .. var rest] => Watch(name.Trim(), rest is [var s, ..] && int.TryParse(s, out var seconds) ? seconds : 120, say),
+                    _ => Usage(say),
+                };
+            }
+            catch (Exception ex) when (attempt < Attempts && ex is ElementNotAvailableException or COMException or ElementNotEnabledException)
+            {
+                // Started on again from the top: it reads the Lock before pressing anything, so a
+                // press made already is seen, not made twice.
+                say($"Tosi Client changed while it was read ({ex.GetType().Name}: {ex.Message}); looking again.");
+                Thread.Sleep(TimeSpan.FromSeconds(2));
+            }
+            catch (NoInputException ex)
+            {
+                // The gateway brings the desktop to its console, where it does, and asks again.
+                say($"{ex.Message}{Saved()}");
+                return NoInput;
+            }
+            catch (Exception ex)
+            {
+                // Never a crash: said, and written down whole.
+                CrashLog.Write(ex, "driving Tosi Client");
+                say($"Tosi Client could not be driven ({ex.GetType().Name}: {ex.Message}).{Saved()} The details are in {CrashLog.Path} on the gateway.");
+                return 1;
+            }
         }
     }
 
     private static int Usage(Action<string> say)
     {
-        say("--tosibox connect <Lock> [--start] | disconnect <Lock> | dump");
+        say("--tosibox connect <Lock> [--start] [--fresh] | disconnect <Lock> | dump | watch <Lock> [seconds]");
         return 1;
     }
 
     // ---------------------------------------------------------------- connect, disconnect
 
-    private static int Switch(string name, bool connect, string? password, bool start, Action<string> say)
+    private static int Switch(string name, bool connect, string? password, bool start, bool fresh, Action<string> say)
     {
         // Running here with no window - in the notification area - it is brought up here, as it
         // would be started: whatever it has connected can only be seen, and disconnected, in its window.
@@ -101,12 +127,13 @@ public static partial class TosiClient
         // The gateway is Tosi Client's only user: no Lock but the facility's stays connected - none
         // before it connects, none after it disconnects.
         if (connect) DisconnectOthers(handle, window, name, say);
-        var result = SwitchOne(handle, window, name, connect, say);
+        var result = SwitchOne(handle, window, name, connect, say, fresh);
         if (!connect) DisconnectOthers(handle, window, null, say);
         return result;
     }
 
-    private static int SwitchOne(IntPtr handle, AutomationElement window, string name, bool connect, Action<string> say)
+    /// <param name="fresh">A Lock connected already is disconnected first, then connected.</param>
+    private static int SwitchOne(IntPtr handle, AutomationElement window, string name, bool connect, Action<string> say, bool fresh = false)
     {
         // The search is left as it is: it shows the Lock, and whatever looks next sets it as it needs.
         var search = (AutomationElement?)null;
@@ -119,6 +146,28 @@ public static partial class TosiClient
 
         var state = Read(Look(window), row);
         say($"Tosi Client shows {name}: {state.Status}{(state.Button is { } shown ? $", with its {shown.Name} button" : ", with no button UI Automation sees")}.");
+
+        // Still disconnecting, from before: let it finish, then go on from where it is.
+        if (state.Leaving)
+        {
+            say($"Tosi Client is still disconnecting {name}: waiting for it to finish.");
+            if (!WaitUntil(() => Now(window, name) is { Leaving: false }, Settle))
+            {
+                say($"Tosi Client was still disconnecting {name} after {Settle.TotalSeconds:0} s.{Saved(window)}");
+                return 1;
+            }
+            if (Now(window, name) is { } settled) state = settled;
+            say($"Tosi Client shows {name}: {state.Status}.");
+        }
+
+        // Up already, and the gateway must see it come up to learn its networks: taken down first.
+        if (connect && fresh && state is { Connected: true, Connecting: false } && Surely(state))
+        {
+            say($"{name} is connected already, and the gateway has to see it connect to learn its networks: disconnecting it first.");
+            if (SwitchOne(handle, window, name, connect: false, say) != 0) return 1;
+            return SwitchOne(handle, window, name, connect: true, say);
+        }
+
         if (state.Connected == connect && !state.Connecting)
         {
             say(connect ? $"{name} is connected in Tosi Client." : $"{name} is not connected in Tosi Client.");
@@ -187,6 +236,9 @@ public static partial class TosiClient
         var deadline = began + (connect ? Connecting : Settle);
         var told = began;
         var lastStatus = state.Status;
+        // A blank status passes for connected only once it has held a while, or the client's
+        // adapter has come up: the list may be caught mid-redraw between one status and the next.
+        DateTime? blankSince = null;
         while (DateTime.UtcNow < deadline)
         {
             Thread.Sleep(500);
@@ -207,9 +259,23 @@ public static partial class TosiClient
                     now = again;
                 }
                 state = Read(seen, now);
-                if (state.Connected == connect && !state.Connecting)
+                var settled = state.Connected == connect && !state.Connecting && !state.Leaving;
+                if (settled && connect && state.Why == Blank)
                 {
-                    say(connect ? $"Tosi Client has connected {name}." : $"Tosi Client has disconnected {name}.");
+                    blankSince ??= DateTime.UtcNow;
+                    settled = DateTime.UtcNow - blankSince >= TimeSpan.FromSeconds(3) || Adapter() is { Up: true };
+                }
+                else blankSince = null;
+                // Its row shows neither way, nor under way, and the client's adapter is up: the
+                // others were disconnected before, so it is this Lock that is up.
+                if (!settled && connect && !state.Connecting && !state.Leaving && !state.Idle && Adapter() is { Up: true })
+                {
+                    settled = true;
+                    state = state with { Why = $"it says {state.Status}, and Tosi Client's adapter is up" };
+                }
+                if (settled)
+                {
+                    say(connect ? $"Tosi Client has connected {name} ({state.Why}; its adapter is {AdapterSays()})." : $"Tosi Client has disconnected {name}.");
                     return 0;
                 }
                 if (state.Status != lastStatus)
@@ -260,14 +326,18 @@ public static partial class TosiClient
             if (!Surely(state)) continue;
             say($"Disconnecting {other} in Tosi Client ({state.Why}).");
             PressRow(handle, seen, line, state);
-            say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false }, Settle)
+            say(WaitUntil(() => Now(window, other) is { Connected: false, Connecting: false, Leaving: false }, Settle)
                 ? $"Tosi Client has disconnected {other}."
                 : $"Tosi Client did not show {other} disconnected within {Settle.TotalSeconds:0} s.");
         }
     }
 
     /// <summary>Connected, or connecting, by what the client plainly shows.</summary>
-    private static bool Surely(State state) => state.Connecting || (state.Connected && state.Why != Blank);
+    /// <remarks>
+    /// A blank status counts only while the client's adapter is up: some Lock is connected then,
+    /// and the client shows a connected Lock's status as a picture, which UI Automation reads as nothing.
+    /// </remarks>
+    private static bool Surely(State state) => state.Connecting || (state.Connected && (state.Why != Blank || Adapter() is { Up: true }));
 
     /// <summary>How many Locks the client lists, and those it shows connected or connecting.</summary>
     private static (int Count, List<string> Connected) ConnectedLocks(IntPtr handle, AutomationElement window, Action<string> say)
@@ -694,7 +764,34 @@ public static partial class TosiClient
 
     /// <param name="Connecting">Neither yet: the client is still at it, and says so (or offers to cancel).</param>
     /// <param name="Why">What told it connected, or not: for the activity log.</param>
-    private sealed record State(bool Connected, bool Connecting, Seen? Button, string Status, string Why = "");
+    /// <param name="Leaving">The client is disconnecting it, and says so.</param>
+    /// <param name="Idle">The client says, in so many words, that it is not connected.</param>
+    private sealed record State(bool Connected, bool Connecting, Seen? Button, string Status, string Why = "", bool Leaving = false, bool Idle = false);
+
+    /// <summary>What a Lock's status says of it, in words.</summary>
+    public enum Says { Nothing, NotConnected, Connecting, Disconnecting, Connected }
+
+    /// <summary>
+    /// A Lock's status, from the cells on its row (but its name): what they say, without its
+    /// addresses (the MAC column, the IP column) or a button's label. Blank for a connected Lock:
+    /// Tosi Client draws "Connected" there as a picture, which UI Automation reads as nothing.
+    /// </summary>
+    public static string Status(IEnumerable<string> cells) =>
+        string.Join(" ", cells.Select(c => c.Trim())
+            .Where(text => text.Length > 0 && !Address().IsMatch(text) && !Hardware().IsMatch(text) && !ConnectButton().IsMatch(text))
+            .Distinct());
+
+    /// <summary>
+    /// What a Lock's status says of it: Tosi Client goes through Connecting..., Authenticating...
+    /// and Assigning IP address... on the way up - anything it shows with an ellipsis is under way -
+    /// and Disconnecting... on the way down. The Lock's address may stand in front of it.
+    /// </summary>
+    public static Says Reading(string status) =>
+        Disconnecting().IsMatch(status) ? Says.Disconnecting
+        : NotConnected().IsMatch(status) ? Says.NotConnected
+        : ConnectingNow().IsMatch(status) ? Says.Connecting
+        : Connected().IsMatch(status) ? Says.Connected
+        : Says.Nothing;
 
     private const string Blank = "its status shows nothing UI Automation can read, as the client shows a connected Lock's";
 
@@ -723,28 +820,29 @@ public static partial class TosiClient
         var button = buttons.FirstOrDefault(b => b.Name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase))
             ?? buttons.FirstOrDefault(b => b.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
             ?? buttons.FirstOrDefault();
-        var status = string.Join(" ", line
+        var status = Status(line
             .Where(s => s.Type != ControlType.Button && s.Type != ControlType.Edit)
-            .Select(s => s.Name.Trim())
-            // Not the Lock's own name, nor a button's label inside the button.
-            .Where(text => text.Length > 0 && !string.Equals(text, row.Name.Trim(), StringComparison.OrdinalIgnoreCase) && !ConnectButton().IsMatch(text))
-            .Distinct());
+            .Select(s => s.Name)
+            // Not the Lock's own name.
+            .Where(text => !string.Equals(text.Trim(), row.Name.Trim(), StringComparison.OrdinalIgnoreCase)));
 
         // The Lock's devices, listed under its row (indented, by address) once it is connected.
         var devices = seen.Count(s => Here(s) && s.Rect.Left > row.Rect.Left + 4
             && s.Rect.Top >= bottom - 2 && s.Rect.Top <= bottom + 3 * 48 && Address().IsMatch(s.Name.Trim()));
 
         // Not connected, for sure: the status says so (ready to connect, no Internet connection …).
-        var idle = NotConnected().IsMatch(status);
-        var connecting = Shows("Cancel") || ConnectingNow().IsMatch(status);
-        var why = idle ? $"it says {status}"
+        var says = Reading(status);
+        var idle = says == Says.NotConnected;
+        var leaving = says == Says.Disconnecting;
+        var connecting = !leaving && (Shows("Cancel") || says == Says.Connecting);
+        var why = idle || leaving ? $"it says {status}"
             : Shows("Disconnect") ? "it shows Disconnect"
-            : Connected().IsMatch(status) ? $"it says {status}"
+            : says == Says.Connected ? $"it says {status}"
             : devices > 0 ? "its devices are listed under it"
             : status.Length == 0 ? Blank
             : $"it says {status}";
-        var connected = !connecting && !idle && (Shows("Disconnect") || Connected().IsMatch(status) || devices > 0 || status.Length == 0);
-        return new State(connected, connecting, button, status.Length > 0 ? status : "(no status shown)", why);
+        var connected = !connecting && !idle && !leaving && (Shows("Disconnect") || says == Says.Connected || devices > 0 || status.Length == 0);
+        return new State(connected, connecting, button, status.Length > 0 ? status : "(no status shown)", why, leaving, idle);
     }
 
     /// <summary>The Lock's row as it is now, where it can be seen; null where it cannot.</summary>
@@ -755,7 +853,7 @@ public static partial class TosiClient
     }
 
     private static bool Changed(State before, State now) =>
-        now.Connected != before.Connected || now.Connecting != before.Connecting
+        now.Connected != before.Connected || now.Connecting != before.Connecting || now.Leaving != before.Leaving
         || now.Status != before.Status || now.Button?.Name != before.Button?.Name;
 
     /// <summary>Where a person would click on the row: its button, or where the Connection column crosses it.</summary>
@@ -802,17 +900,25 @@ public static partial class TosiClient
 
     // ---------------------------------------------------------------- what it sees, written down
 
+    /// <summary>A picture of the screen, beside <see cref="DumpPath"/>.</summary>
+    public static string PicturePath { get; } = Path.ChangeExtension(DumpPath, ".png");
+
     private static int Dump(Action<string> say)
     {
         var found = false;
+        var shown = IntPtr.Zero;
         foreach (var title in new[] { MainTitle(), PasswordTitle() })
         {
             var handle = FindWindow(title);
             if (handle == IntPtr.Zero) continue;
             found = true;
+            say($"[{Title(handle)}: {(IsWindowVisible(handle) ? "shown" : "hidden")}]");
             Write(AutomationElement.FromHandle(handle), 0, say);
+            shown = handle;
         }
-        if (!found) say("No Tosi Client window on this desktop.");
+        if (!found) say($"No Tosi Client window on this desktop.{Nearby()}");
+        say($"[Adapter: {(Adapter() is { } adapter ? $"{adapter.Name}, {(adapter.Up ? "up" : "down")} {adapter.Addresses}" : "none named for Tosi")}]");
+        if (Snap(PicturePath, shown)) say($"[A picture of the screen is in {PicturePath}.]");
         return found ? 0 : NotHere;
     }
 
@@ -824,15 +930,115 @@ public static partial class TosiClient
             var lines = new List<string>();
             if (window is not null) Write(window, 0, lines.Add);
             else Dump(lines.Add);
+            lines.Add($"[Adapter: {AdapterSays()}]");
             Directory.CreateDirectory(Path.GetDirectoryName(DumpPath)!);
             File.WriteAllLines(DumpPath, lines);
-            return $" What it showed is in {DumpPath} on the gateway.";
+            var handle = window is null ? FindWindow(MainTitle()) : new IntPtr(window.Current.NativeWindowHandle);
+            var picture = Snap(PicturePath, handle) ? $", and a picture of the screen in {PicturePath}" : "";
+            return $" What it showed is in {DumpPath} on the gateway{picture}.";
         }
         catch (Exception)
         {
             return "";
         }
     }
+
+    /// <summary>
+    /// Watches a Lock's row, and the client's adapter, without pressing anything: each time what
+    /// they show changes, it is said, and the client's window and the screen saved as they are
+    /// then, numbered, in a folder beside <see cref="DumpPath"/>. For working out what the client
+    /// shows on the way up and down: press Connect or Disconnect while it watches.
+    /// </summary>
+    private static int Watch(string name, int seconds, Action<string> say)
+    {
+        var handle = FindWindow(MainTitle());
+        if (handle == IntPtr.Zero)
+        {
+            say($"Tosi Client shows no window on this desktop.{Nearby()}");
+            return NotHere;
+        }
+        var window = AutomationElement.FromHandle(handle);
+        var folder = Path.Combine(Path.GetDirectoryName(DumpPath)!, "tosi-watch");
+        if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        Directory.CreateDirectory(folder);
+        var log = new List<string>();
+        void Tell(string line)
+        {
+            say(line);
+            log.Add(line);
+            File.WriteAllLines(Path.Combine(folder, "watch.txt"), log);
+        }
+
+        AutomationElement? search = null;
+        if (Locate(handle, window, name, ref search, Tell) is null) Tell($"{name} is not in view: search for it in Tosi Client, and it is watched from then on.");
+        Tell($"Watching {name} in Tosi Client for {seconds} s. Each change is saved in {folder}.");
+
+        var began = DateTime.UtcNow;
+        string? last = null;
+        var saved = 0;
+        while (DateTime.UtcNow - began < TimeSpan.FromSeconds(seconds))
+        {
+            try
+            {
+                var seen = Look(window);
+                var now = Row(seen, name) is { } row && Read(seen, row) is var s
+                    ? $"\"{s.Status}\" - {(s.Connected ? "connected" : s.Connecting ? "connecting" : s.Leaving ? "disconnecting" : s.Idle ? "not connected" : "neither")}, as {s.Why}; {(s.Button is { } b ? $"button {b.Name}" : "no button")}"
+                    : "(the Lock is not in view)";
+                now += $"; adapter: {AdapterSays()}";
+                if (now != last)
+                {
+                    last = now;
+                    Tell($"{(DateTime.UtcNow - began).TotalSeconds,6:0.0} s  {now}");
+                    if (saved < 60)
+                    {
+                        saved++;
+                        var lines = new List<string>();
+                        Write(window, 0, lines.Add);
+                        File.WriteAllLines(Path.Combine(folder, $"{saved:00}.txt"), lines);
+                        Snap(Path.Combine(folder, $"{saved:00}.png"), handle);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+            {
+                // Changed while it was read: looked at again.
+            }
+            Thread.Sleep(500);
+        }
+        Tell("Done watching.");
+        return 0;
+    }
+
+    // ---------------------------------------------------------------- its adapter
+
+    /// <param name="Up">Windows has it up: a TAP adapter is up only while a tunnel holds it open.</param>
+    private sealed record TosiAdapter(string Name, bool Up, string Addresses);
+
+    /// <summary>Tosi Client's network adapter (Tosibox TAP-Windows Adapter): the one up, if one is.</summary>
+    private static TosiAdapter? Adapter()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => Product().IsMatch(n.Description))
+                .Select(n => new TosiAdapter(
+                    $"{n.Name} ({n.Description})",
+                    n.OperationalStatus == OperationalStatus.Up,
+                    string.Join(", ", n.GetIPProperties().UnicastAddresses
+                        .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        .Select(a => $"{a.Address}/{a.PrefixLength}"))))
+                .OrderByDescending(a => a.Up)
+                .FirstOrDefault();
+        }
+        catch (NetworkInformationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>How the adapter is, for the activity: "up at …", "down", or that there is none.</summary>
+    private static string AdapterSays() =>
+        Adapter() is { } adapter ? $"{(adapter.Up ? "up" : "down")}{(adapter.Addresses.Length > 0 ? $" at {adapter.Addresses}" : "")}" : "none named for Tosi";
 
     // ---------------------------------------------------------------- Windows
 
@@ -845,8 +1051,12 @@ public static partial class TosiClient
     [GeneratedRegex(@"^((Dis)?connect|Cancel)$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectButton();
 
-    [GeneratedRegex(@"\bconnecting\b", RegexOptions.IgnoreCase)]
+    /// <summary>On the way up: connecting, authenticating, assigning an address … or anything else with an ellipsis.</summary>
+    [GeneratedRegex(@"\b(re)?connecting\b|\bauthenticat|\bassigning\b|\bnegotiat|\bestablishing\b|\binitiali[sz]|\bhandshak|\bresolving\b|(\.\.\.|…)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectingNow();
+
+    [GeneratedRegex(@"\bdisconnecting\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Disconnecting();
 
     /// <summary>Tosi, TOSIBOX, TosiboxKey …</summary>
     [GeneratedRegex(@"\btosi", RegexOptions.IgnoreCase)]
@@ -870,6 +1080,10 @@ public static partial class TosiClient
 
     [GeneratedRegex(@"^\d{1,3}(\.\d{1,3}){3}$")]
     private static partial Regex Address();
+
+    /// <summary>A MAC address, as the client's MAC column shows it (10:9a:b9:08:72:2a).</summary>
+    [GeneratedRegex(@"^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$", RegexOptions.IgnoreCase)]
+    private static partial Regex Hardware();
 
     /// <summary>
     /// What there is of Tosi on this desktop when its windows are not as expected: the titles of

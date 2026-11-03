@@ -21,6 +21,13 @@ public static class DesktopSession
     /// <summary>The app's exit code for "not in this session".</summary>
     public const int NotHere = 3;
 
+    /// <summary>
+    /// The app's exit code for "Windows took no clicks or typing here": a desktop shown in a
+    /// minimized Remote Desktop window. Brought to the gateway's console - a VM's own screen, which
+    /// is always drawn - it takes them, and the app runs again.
+    /// </summary>
+    public const int NoInput = 4;
+
     private const int PrivilegeNotHeld = 1314;
 
     /// <param name="args">
@@ -85,7 +92,14 @@ public static class DesktopSession
             int code;
             using (var user = new SafeAccessTokenHandle(token))
             using (var full = Elevated(user))
+            {
                 code = RunAs(full.IsInvalid ? user : full, app, args, timeout);
+                if (code == NoInput && connected && Station(session) == "Remote Desktop" && ToConsole(session, fromRemoteDesktop: true))
+                {
+                    Console.WriteLine($"Again, on {Describe(session)}'s desktop at the gateway's console:");
+                    code = RunAs(full.IsInvalid ? user : full, app, args, timeout);
+                }
+            }
             if (code != NotHere) return code;
         }
 
@@ -169,7 +183,11 @@ public static class DesktopSession
     /// is SYSTEM that moves it. Not when someone is signed in at the console, whose desktop it would
     /// take; nor when run by hand, without the right to.
     /// </summary>
-    private static bool ToConsole(uint session)
+    /// <param name="fromRemoteDesktop">
+    /// The session is shown over Remote Desktop, and Windows takes no input there (its window
+    /// minimized): taken from that window to the console, which closes the window.
+    /// </param>
+    private static bool ToConsole(uint session, bool fromRemoteDesktop = false)
     {
         const int noToken = 1008;
         var console = WTSGetActiveConsoleSessionId();
@@ -187,7 +205,9 @@ public static class DesktopSession
             Console.WriteLine($"{Describe(session)}'s desktop (session {session}) is disconnected, and could not be brought to the gateway's console ({why}): Windows takes no clicks or typing there.");
             return false;
         }
-        Console.WriteLine($"Brought {Describe(session)}'s desktop (session {session}) to the gateway's console: nobody was connected to it, and Windows takes no clicks or typing on a disconnected desktop.");
+        Console.WriteLine(fromRemoteDesktop
+            ? $"Brought {Describe(session)}'s desktop (session {session}) from Remote Desktop to the gateway's console: Windows took no clicks or typing over Remote Desktop, as happens while its window is minimized. That Remote Desktop window is closed; connect again to see the desktop."
+            : $"Brought {Describe(session)}'s desktop (session {session}) to the gateway's console: nobody was connected to it, and Windows takes no clicks or typing on a disconnected desktop.");
         // The desktop takes a moment to be shown there, and to take input.
         Thread.Sleep(TimeSpan.FromSeconds(2));
         return true;

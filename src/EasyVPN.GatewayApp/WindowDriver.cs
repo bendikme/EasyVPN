@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -14,6 +15,16 @@ namespace EasyVPN.GatewayApp;
 /// </summary>
 internal static class WindowDriver
 {
+    /// <summary>
+    /// The exit code for "Windows took no clicks or typing on this desktop": the gateway brings a
+    /// Remote Desktop session to its console, which always takes them, and runs it again.
+    /// </summary>
+    public const int NoInput = 4;
+
+    /// <summary>Windows took no clicks or typing here: a locked desktop, or one shown in a minimized Remote Desktop window.</summary>
+    internal sealed class NoInputException() : InvalidOperationException(
+        "Windows did not take the keyboard or mouse input: the gateway's desktop must be signed in, unlocked, and shown - not in a minimized Remote Desktop window.");
+
     /// <summary>One element of a window as it was when looked at.</summary>
     internal sealed record Seen(AutomationElement Element, string Name, ControlType Type, Rect Rect, bool Offscreen, bool Enabled, string Help,
         bool ReadOnly = false, string Value = "", bool Password = false)
@@ -159,6 +170,65 @@ internal static class WindowDriver
             Write(child, depth + 1, say);
     }
 
+    /// <summary>
+    /// A picture of the whole desktop, as a person at it would see it, saved as a PNG: what UI
+    /// Automation cannot tell - icons, colours, a dialog drawn over the client. Where the desktop
+    /// cannot be copied (nobody is looking at it), <paramref name="window"/> is asked to draw itself.
+    /// </summary>
+    /// <returns>False where there was nothing to copy.</returns>
+    internal static bool Snap(string path, IntPtr window = default)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
+            using var picture = new System.Drawing.Bitmap(screen.Width, screen.Height);
+            using (var graphics = System.Drawing.Graphics.FromImage(picture))
+                graphics.CopyFromScreen(screen.Left, screen.Top, 0, 0, picture.Size);
+            picture.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex) when (ex is ExternalException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // GDI+ and Win32 failures are ExternalExceptions: no screen to copy here.
+        }
+        if (window == IntPtr.Zero || !GetWindowRect(window, out var r) || r.Right <= r.Left || r.Bottom <= r.Top) return false;
+        try
+        {
+            using var picture = new System.Drawing.Bitmap(r.Right - r.Left, r.Bottom - r.Top);
+            using (var graphics = System.Drawing.Graphics.FromImage(picture))
+            {
+                var dc = graphics.GetHdc();
+                try
+                {
+                    if (!PrintWindow(window, dc, 2 /* PW_RENDERFULLCONTENT */)) return false;
+                }
+                finally
+                {
+                    graphics.ReleaseHdc(dc);
+                }
+            }
+            picture.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex) when (ex is ExternalException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr handle, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr handle, IntPtr dc, uint flags);
+
     // ---------------------------------------------------------------- Windows
 
     /// <summary>A top-level window by its title, shown or not: a client may sit hidden in the notification area.</summary>
@@ -284,7 +354,7 @@ internal static class WindowDriver
     private static void Send(params Input[] inputs)
     {
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length)
-            throw new InvalidOperationException("Windows did not take the keyboard or mouse input: the gateway's desktop must be signed in and unlocked for this.");
+            throw new NoInputException();
     }
 
     private static Input Mouse(uint flags) => new() { Type = 0, Union = new InputUnion { Mouse = new MouseInput { Flags = flags } } };

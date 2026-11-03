@@ -13,9 +13,13 @@
 
     Someone must be signed in to the gateway's desktop: set the gateway to sign in by itself. The
     client is looked for, and started, only where someone is at the desktop (unlocked first); a
-    copy left on another desktop is closed first. Should a Lock not connect, run this on the
-    gateway's desktop and look at what the app sees:
+    copy left on another desktop is closed first. A desktop shown in a minimized Remote Desktop
+    window takes no clicks: it is brought to the gateway's console, a VM's own screen, and tried
+    again. Should a Lock not connect, what the client showed, and a picture of the screen, are
+    saved beside the app's log; or run this on the gateway's desktop and look at what the app sees:
         "C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox dump > tosi.txt
+    or watch a Lock while you press its Connect (each change saved, with a picture, in tosi-watch):
+        "C:\Program Files\EasyVPN Gateway\EasyVPN.GatewayApp.exe" --tosibox watch "Tosibox 15 [Plant]" > watch.txt
     Check: the gateway app there, and a Lock set. It does not touch the client.
 #>
 #check-shared: program

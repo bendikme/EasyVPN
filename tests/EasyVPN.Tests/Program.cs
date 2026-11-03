@@ -8,6 +8,7 @@ using EasyVPN.Agent;
 using EasyVPN.Gateway;
 using OpenVpnProfile = GatewayAppAssembly::EasyVPN.GatewayApp.OpenVpnProfile;
 using FacilitiesViewModel = GatewayAppAssembly::EasyVPN.GatewayApp.FacilitiesViewModel;
+using TosiClient = GatewayAppAssembly::EasyVPN.GatewayApp.TosiClient;
 
 // No VPN software, network changes, administrator rights or test packages are required.
 var root = Path.Combine(Path.GetTempPath(), "EasyVPN.Tests", Guid.NewGuid().ToString("N"));
@@ -184,6 +185,25 @@ try
         {
             Require(ex.Message.Contains("another machine"), ex.Message);
         }
+    });
+    await Check("Tosi Client's statuses on the way up and down", () =>
+    {
+        // As a gateway's Tosi Client showed them, the Lock's address in front.
+        Equal(TosiClient.Says.NotConnected, TosiClient.Reading("10:9a:b9:08:72:2a Gateway online and ready to connect"));
+        Equal(TosiClient.Says.NotConnected, TosiClient.Reading("Gateway has no Internet connection"));
+        Equal(TosiClient.Says.Connecting, TosiClient.Reading("10:9a:b9:08:72:2a Connecting..."));
+        Equal(TosiClient.Says.Connecting, TosiClient.Reading("10:9a:b9:08:72:2a Authenticating..."));
+        Equal(TosiClient.Says.Connecting, TosiClient.Reading("10:9a:b9:08:72:2a Assigning IP address..."));
+        Equal(TosiClient.Says.Connecting, TosiClient.Reading("Negotiating…"));
+        Equal(TosiClient.Says.Disconnecting, TosiClient.Reading("10:9a:b9:08:72:2a Disconnecting..."));
+        Equal(TosiClient.Says.NotConnected, TosiClient.Reading("Disconnected"));
+        Equal(TosiClient.Says.Connected, TosiClient.Reading("Connected"));
+        Equal(TosiClient.Says.Nothing, TosiClient.Reading("10:9a:b9:08:72:2a"));
+        Equal(TosiClient.Says.Nothing, TosiClient.Reading(""));
+        // Its row's cells but the name: IP, MAC, Status, Connection, Actions. Connected, the status is a picture.
+        Equal("", TosiClient.Status(["", "10:9a:b9:08:72:2a", "", "", ""]));
+        Equal("Assigning IP address...", TosiClient.Status(["", "10:9a:b9:08:72:2a", "Assigning IP address...", "", ""]));
+        Equal("Gateway online and ready to connect", TosiClient.Status(["192.168.1.5", "10-9A-B9-08-72-2A", "Gateway online and ready to connect", "Connect"]));
     });
     await Check("VPN route discovery filters uplinks and broadcasts", () =>
     {

@@ -161,7 +161,8 @@ public sealed class ConnectionController(
         IReadOnlyList<string> remembered = learn ? _learned.Of(facility.Id) : [];
 
         _up = facility;
-        var code = await connectors.RunAsync(facility, "Connect", ct, line => Progress(request, line));
+        // Nothing learned of it yet: it must be seen to come up, not found up already.
+        var code = await connectors.RunAsync(facility, "Connect", ct, line => Progress(request, line), fresh: learn && remembered.Count == 0);
         if (code != 0)
         {
             await FailAsync(request, $"The {facility.Connector} connector failed (exit code {code})");
