@@ -82,6 +82,7 @@ public sealed class Tunnel(RecentLog log)
         var address = IPAddress.Parse(lease.Address);
         Wintun? adapter = null;
         Thread? reader = null;
+        NetworkAddressChangedEventHandler? changed = null;
         try
         {
             while (adapter is null)
@@ -98,10 +99,13 @@ public sealed class Tunnel(RecentLog log)
             }
             if (Prepare) _ = PrepareAsync();
             var made = adapter;
-            reader = new Thread(() => Read(made)) { IsBackground = true, Name = "EasyVPN tunnel" };
+            var own = IPv4.Of(address);
+            changed = (_, _) => KeepSource(made, address);
+            NetworkChange.NetworkAddressChanged += changed;
+            KeepSource(made, address);
+            reader = new Thread(() => Read(made, own)) { IsBackground = true, Name = "EasyVPN tunnel" };
             reader.Start();
 
-            var own = IPv4.Of(address);
             var wait = TimeSpan.FromSeconds(1);
             while (true)
             {
@@ -139,17 +143,48 @@ public sealed class Tunnel(RecentLog log)
         finally
         {
             _link = null;
+            if (changed is not null) NetworkChange.NetworkAddressChanged -= changed;
             adapter?.Dispose();
             reader?.Join(TimeSpan.FromSeconds(5));
         }
     }
 
-    /// <summary>What Windows routes to the adapter, to the gateway; dropped while the link is down.</summary>
-    private void Read(Wintun adapter)
+    /// <summary>
+    /// Another address put on the adapter - TIA Portal adds one in a device's subnet, to reach it -
+    /// would be the one Windows sends from to that subnet, and the gateway drops what is not from
+    /// this PC's own address: connected, yet nothing answers. It stays, but Windows sends from ours.
+    /// </summary>
+    private void KeepSource(Wintun adapter, IPAddress own)
+    {
+        try
+        {
+            foreach (var other in adapter.KeepSource(own))
+                _log.Add($"{other} was added to the {AdapterName} adapter. It stays, but this PC sends from {own}, the only address the tunnel carries.");
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or ObjectDisposedException)
+        {
+            // Going, or no iphlpapi: the gateway's drop is what is left.
+        }
+    }
+
+    /// <summary>
+    /// What Windows routes to the adapter, to the gateway; dropped while the link is down. Only
+    /// IPv4 from this PC's own address goes: the gateway carries nothing else. A program bound to
+    /// another address on the adapter is said once, as nothing it sends is answered.
+    /// </summary>
+    private void Read(Wintun adapter, uint own)
     {
         var packet = new byte[Wintun.MaxPacket];
+        var told = new HashSet<uint>();
         int length;
-        while ((length = adapter.Read(packet)) > 0) _link?.Send(packet.AsSpan(0, length));
+        while ((length = adapter.Read(packet)) > 0)
+        {
+            var span = packet.AsSpan(0, length);
+            if (!IPv4.TryRead(span, out var source, out _)) continue;
+            if (source == own) _link?.Send(span);
+            else if (told.Add(source))
+                _log.Add($"A program sent from {IPv4.From(source)} on the {AdapterName} adapter. The tunnel carries only what is from {IPv4.From(own)}, so it gets no answer.");
+        }
     }
 
     /// <summary>What the gateway sends, into Windows: only what is for this PC's own address on the tunnel.</summary>

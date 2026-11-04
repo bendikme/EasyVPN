@@ -30,11 +30,14 @@ public sealed class Wintun : IDisposable
     static Wintun() => NativeLibrary.SetDllImportResolver(typeof(Wintun).Assembly, (name, _, _) =>
         name == "wintun.dll" ? NativeLibrary.Load(Path.Combine(AppContext.BaseDirectory, "wintun.dll")) : IntPtr.Zero);
 
+    private readonly ulong _luid;
+
     private Wintun(IntPtr adapter, IntPtr session)
     {
         _adapter = adapter;
         _session = session;
         _readEvent = WintunGetReadWaitEvent(session);
+        WintunGetAdapterLUID(adapter, out _luid);
     }
 
     public string Name { get; private init; } = "";
@@ -63,8 +66,7 @@ public sealed class Wintun : IDisposable
         var wintun = new Wintun(adapter, session) { Name = name };
         try
         {
-            WintunGetAdapterLUID(adapter, out var luid);
-            SetAddress(luid, address, prefixLength);
+            SetAddress(wintun._luid, address, prefixLength);
             SetMtu(name, mtu);
             return wintun;
         }
@@ -151,6 +153,38 @@ public sealed class Wintun : IDisposable
 
     private void Exit() => Interlocked.Decrement(ref _users);
 
+    /// <summary>
+    /// Keeps <paramref name="own"/> the only IPv4 address Windows sends from on the adapter. Any
+    /// other one put on it - TIA Portal adds one in a device's subnet to reach it - stays, but is
+    /// marked SkipAsSource: Windows would otherwise send from it to that subnet, and the other end
+    /// carries only what is from <paramref name="own"/>.
+    /// </summary>
+    /// <returns>The addresses marked now.</returns>
+    public IReadOnlyList<IPAddress> KeepSource(IPAddress own)
+    {
+        var marked = new List<IPAddress>();
+        if (_closed || GetUnicastIpAddressTable(2, out var table) != 0) return marked;
+        try
+        {
+            var count = Marshal.ReadInt32(table);
+            for (var i = 0; i < count; i++)
+            {
+                // MIB_UNICASTIPADDRESS_TABLE: the count, then the rows, 8-byte aligned.
+                var row = Marshal.PtrToStructure<MibUnicastIpAddressRow>(table + 8 + i * Marshal.SizeOf<MibUnicastIpAddressRow>());
+                if (row.InterfaceLuid != _luid || row.SkipAsSource != 0) continue;
+                var address = new IPAddress(row.Address.AsSpan());
+                if (address.Equals(own)) continue;
+                row.SkipAsSource = 1;
+                if (SetUnicastIpAddressEntry(ref row) == 0) marked.Add(address);
+            }
+        }
+        finally
+        {
+            FreeMibTable(table);
+        }
+        return marked;
+    }
+
     // ---------------------------------------------------------------- the adapter's settings
 
     private static void SetAddress(ulong luid, IPAddress address, int prefixLength)
@@ -192,7 +226,9 @@ public sealed class Wintun : IDisposable
         [FieldOffset(4)] public InAddr Address;
         [FieldOffset(32)] public ulong InterfaceLuid;
         [FieldOffset(60)] public byte OnLinkPrefixLength;
+        [FieldOffset(61)] public byte SkipAsSource;
         [FieldOffset(64)] public int DadState;
+        [FieldOffset(72)] public long CreationTimeStamp; // the row's last field, so all 80 bytes are copied
     }
 
     [InlineArray(4)]
@@ -208,6 +244,15 @@ public sealed class Wintun : IDisposable
 
     [DllImport("iphlpapi.dll")]
     private static extern int CreateUnicastIpAddressEntry(ref MibUnicastIpAddressRow row);
+
+    [DllImport("iphlpapi.dll")]
+    private static extern int SetUnicastIpAddressEntry(ref MibUnicastIpAddressRow row);
+
+    [DllImport("iphlpapi.dll")]
+    private static extern int GetUnicastIpAddressTable(ushort family, out IntPtr table);
+
+    [DllImport("iphlpapi.dll")]
+    private static extern void FreeMibTable(IntPtr memory);
 
     [DllImport("kernel32.dll")]
     private static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool all, uint milliseconds);

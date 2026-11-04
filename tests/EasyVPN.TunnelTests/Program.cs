@@ -140,6 +140,13 @@ if (admin)
                 var mtu = Adapters.IPv4Mtu(name);
                 Require(mtu == Defaults.TunnelMtu, $"its IPv4 MTU is {mtu}");
                 Require(nic.OperationalStatus == OperationalStatus.Up, $"it is {nic.OperationalStatus}");
+
+                // Another address put on it, as TIA Portal does: kept, but never sent from.
+                Require(adapter.KeepSource(IPAddress.Parse("198.18.250.1")).Count == 0, "its own address was marked, or one that was not there");
+                Firewall.Netsh("interface", "ipv4", "add", "address", name, "198.18.250.50", "255.255.255.0", "store=active");
+                var marked = adapter.KeepSource(IPAddress.Parse("198.18.250.1"));
+                Require(marked.Count == 1 && marked[0].ToString() == "198.18.250.50", $"marked {string.Join(", ", marked)}, not 198.18.250.50");
+                Require(adapter.KeepSource(IPAddress.Parse("198.18.250.1")).Count == 0, "198.18.250.50 was not left marked");
             }
             await Adapters.WaitAsync(name, present: false);
         });
@@ -433,7 +440,7 @@ sealed class Firewall : IDisposable
 
     public void Dispose() => Netsh("advfirewall", "firewall", "delete", "rule", $"name={Rule}");
 
-    private static void Netsh(params string[] args)
+    public static void Netsh(params string[] args)
     {
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "netsh.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
         foreach (var arg in args) start.ArgumentList.Add(arg);
