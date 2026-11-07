@@ -17,7 +17,9 @@ namespace EasyVPN.GatewayApp;
 /// app, started in the desktop session where the client runs, do what a person would there:
 /// enter the client's password if it asks, find the Lock, press its Connect or Disconnect, and
 /// wait until the client shows it so. Through UI Automation where the client offers it, and with
-/// the mouse and keyboard where it does not - which needs the session's screen unlocked.
+/// the mouse and keyboard where it does not - which needs the session's screen unlocked. The client
+/// is left listing every Lock (its search emptied), as Tosibox Monitor reads its list, and its
+/// "Access rights changed" - Locks given to the key, or taken - is answered with OK.
 ///
 ///   EasyVPN.GatewayApp.exe --tosibox connect "Tosibox 15 [Plant]" [--start] [--fresh]   the password in EASYVPN_PASSWORD
 ///   EasyVPN.GatewayApp.exe --tosibox disconnect "Tosibox 15 [Plant]"
@@ -113,29 +115,41 @@ public static partial class TosiClient
         }
         Front(handle);
         var window = AutomationElement.FromHandle(handle);
-        // Just signed in, the client takes a while to fill its list.
-        if (!Look(window).Any(Listed))
+        try
         {
-            say("Waiting for Tosi Client to list its Locks.");
-            if (!WaitUntil(() => Look(window).Any(Listed), ListFills))
+            // Access rights given to the key while it was away come in a dialog over the window,
+            // which takes nothing else until it is answered.
+            if (!Answered(handle, say)) return 1;
+            // Just signed in, the client takes a while to fill its list.
+            if (!Look(window).Any(Listed))
             {
-                say($"Tosi Client showed no list of Locks within {ListFills.TotalSeconds:0} s.{Saved(window)}");
-                return 1;
+                say("Waiting for Tosi Client to list its Locks.");
+                if (!WaitUntil(() => Look(window).Any(Listed), ListFills))
+                {
+                    say($"Tosi Client showed no list of Locks within {ListFills.TotalSeconds:0} s.{Saved(window)}");
+                    return 1;
+                }
+                if (!Answered(handle, say)) return 1;
             }
-        }
 
-        // The gateway is Tosi Client's only user: no Lock but the facility's stays connected - none
-        // before it connects, none after it disconnects.
-        if (connect) DisconnectOthers(handle, window, name, say);
-        var result = SwitchOne(handle, window, name, connect, say, fresh);
-        if (!connect) DisconnectOthers(handle, window, null, say);
-        return result;
+            // The gateway is Tosi Client's only user: no Lock but the facility's stays connected - none
+            // before it connects, none after it disconnects.
+            if (connect) DisconnectOthers(handle, window, name, say);
+            var result = SwitchOne(handle, window, name, connect, say, fresh);
+            if (!connect) DisconnectOthers(handle, window, null, say);
+            return result;
+        }
+        finally
+        {
+            // Whatever came of it, the client is left listing every Lock: Tosibox Monitor reads its list.
+            ClearSearch(handle, window, say);
+        }
     }
 
     /// <param name="fresh">A Lock connected already is disconnected first, then connected.</param>
     private static int SwitchOne(IntPtr handle, AutomationElement window, string name, bool connect, Action<string> say, bool fresh = false)
     {
-        // The search is left as it is: it shows the Lock, and whatever looks next sets it as it needs.
+        // The search stays while the Lock is switched, keeping its row in view; Switch empties it after.
         var search = (AutomationElement?)null;
         var row = Locate(handle, window, name, ref search, say);
         if (row is null)
@@ -249,6 +263,8 @@ public static partial class TosiClient
             }
             try
             {
+                // Access rights that come in while it connects are answered: the client takes nothing until they are.
+                if (!IsWindowEnabled(handle)) Acknowledge(handle, say);
                 var seen = Look(window);
                 // Out of view again (someone scrolled, the list was redrawn): found again.
                 if (Row(seen, name) is not { } now)
@@ -461,6 +477,156 @@ public static partial class TosiClient
             // Gone meanwhile.
         }
         return null;
+    }
+
+    // ---------------------------------------------------------------- left as found: its list, its dialogs
+
+    /// <summary>
+    /// The client's search emptied, so its list shows every Lock again. Tosibox Monitor reads the list
+    /// as it stands, and a search left in it hides every other Lock from it. A run that needs its Lock
+    /// in view searches for it again.
+    /// </summary>
+    private static void ClearSearch(IntPtr handle, AutomationElement window, Action<string> say)
+    {
+        try
+        {
+            // A dialog over the window takes the typing.
+            if (!IsWindowEnabled(handle)) Acknowledge(handle, say);
+            if (SearchBox(Look(window)) is not { Value.Length: > 0 } box) return;
+            if (Enter(handle, box.Element, "") is null || ValueOf(box.Element) is { Length: > 0 })
+                say($"Tosi Client's search could not be emptied: it still holds \"{ValueOf(box.Element) ?? box.Value}\", so its list, and Tosibox Monitor, show only the Locks it finds.");
+        }
+        catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+        {
+            say($"Tosi Client's search could not be emptied ({ex.Message}): Tosibox Monitor sees only the Locks it shows.");
+        }
+    }
+
+    /// <summary>What is done with a dialog the client shows over its window.</summary>
+    public enum Answer { Leave, Wait, Press }
+
+    /// <summary>Nothing in the way of the client's window: what it may answer is answered, and anything else said.</summary>
+    private static bool Answered(IntPtr handle, Action<string> say)
+    {
+        if (Acknowledge(handle, say) is not { } open) return true;
+        say($"Tosi Client shows {open} over its window, and takes nothing else until someone answers it on the gateway's desktop.{Saved()}");
+        return false;
+    }
+
+    /// <summary>
+    /// Answers the client's "Access rights changed" - Locks given to its key by a Master Key, or
+    /// taken from it - which waits over its window for a person: until it is answered the client
+    /// takes nothing else, and Tosibox Monitor can only report it. Every Lock it offers is ticked
+    /// and its OK pressed: the gateway takes them all, as its facilities are made from them and
+    /// Tosibox Monitor watches them. Nothing else is ever pressed: what a person must decide (Accept
+    /// or Reject, Remove or Cancel) is left to a person.
+    /// </summary>
+    /// <returns>Null when nothing is in the way; otherwise the dialog that is, for saying so.</returns>
+    private static string? Acknowledge(IntPtr main, Action<string> say)
+    {
+        var deadline = DateTime.UtcNow + Settle;
+        var pressed = new HashSet<IntPtr>();
+        while (true)
+        {
+            string? open = null, waitedOn = null;
+            foreach (var dialog in OtherWindows(main))
+            {
+                var title = Title(dialog);
+                if (PasswordTitle().IsMatch(title)) continue;
+                try
+                {
+                    var seen = Look(AutomationElement.FromHandle(dialog));
+                    var texts = seen.Where(s => s.Visible && s.Type == ControlType.Text && s.Name.Trim().Length > 0).Select(s => s.Name.Trim()).Distinct().ToList();
+                    var buttons = seen.Where(s => s.Visible && s.Type == ControlType.Button && Label(s.Name).Length > 0).ToList();
+                    var (answer, label) = Answering(title, texts, [.. buttons.Select(b => (b.Name, b.Enabled))]);
+                    var shown = Shown(title, texts, buttons.Select(b => b.Name));
+                    if (answer == Answer.Press && !pressed.Contains(dialog))
+                    {
+                        var offered = seen.Where(Offered).Select(s => s.Name.Trim()).Where(n => n.Length > 0).Distinct().ToList();
+                        var (ticked, unticked) = Granted().IsMatch(title) || texts.Any(Granted().IsMatch) ? Tick(seen) : ([], []);
+                        Press(dialog, buttons.First(b => b.Name == label).Element);
+                        pressed.Add(dialog);
+                        say($"Tosi Client showed {shown}{(offered.Count > 0 ? $", listing {string.Join(", ", offered)}" : "")}. Pressed {Label(label!)}"
+                            + (ticked.Count > 0 ? $", after ticking {string.Join(", ", ticked)}" : "")
+                            + (unticked.Count > 0 ? $"; {string.Join(", ", unticked)} could not be ticked, so the key does not take them" : "") + ".");
+                    }
+                    // Pressed and closing, still receiving, or its OK not yet on: looked at again.
+                    if (answer != Answer.Leave) waitedOn = shown;
+                    // Anything else is in the way only while the window waits on it.
+                    else if (!IsWindowEnabled(main)) open ??= shown;
+                }
+                catch (Exception ex) when (ex is ElementNotAvailableException or COMException or ElementNotEnabledException
+                                           or (InvalidOperationException and not NoInputException))
+                {
+                    // Closed, or changed, while it was read or pressed: looked at again.
+                    waitedOn ??= $"\"{title}\"";
+                }
+            }
+            if (waitedOn is null) return open;
+            if (DateTime.UtcNow >= deadline) return open ?? waitedOn;
+            Thread.Sleep(500);
+        }
+    }
+
+    /// <summary>
+    /// What is done with a dialog of the client's. "Access rights changed" is answered with its OK, or
+    /// with its one button when that one does not refuse; while it is still receiving the changes, or
+    /// its OK is off, it is waited for. Anything else is left.
+    /// </summary>
+    /// <param name="texts">What it says: its title aside.</param>
+    /// <param name="buttons">Its buttons' labels, and whether each takes a press.</param>
+    /// <returns>What to do, and the label of the button to press.</returns>
+    public static (Answer Answer, string? Button) Answering(string title, IReadOnlyList<string> texts, IReadOnlyList<(string Name, bool Enabled)> buttons)
+    {
+        if (!AccessRights().IsMatch(title) && !texts.Any(AccessRights().IsMatch)) return (Answer.Leave, null);
+        (string Name, bool Enabled)? choice =
+            buttons.FirstOrDefault(b => string.Equals(Label(b.Name), "OK", StringComparison.OrdinalIgnoreCase)) is { Name: not null } ok ? ok
+            : buttons is [var only] && !Refusing().IsMatch(Label(only.Name)) ? only
+            : null;
+        if (choice is not { } button)
+            return (buttons.Count == 0 || Receiving().IsMatch(title) || texts.Any(Receiving().IsMatch) ? Answer.Wait : Answer.Leave, null);
+        return button.Enabled ? (Answer.Press, button.Name) : (Answer.Wait, null);
+    }
+
+    /// <summary>A button's label as it reads: without the &amp; that marks its key.</summary>
+    private static string Label(string name) => name.Replace("&", "").Trim();
+
+    /// <summary>A Lock a dialog lists.</summary>
+    private static bool Offered(Seen s) =>
+        s.Type == ControlType.TreeItem || s.Type == ControlType.DataItem || s.Type == ControlType.ListItem || s.Type == ControlType.CheckBox;
+
+    /// <summary>Every Lock offered ticked, so OK takes them all. Each is read as it is now: ticking a Lock ticks what is under it.</summary>
+    /// <returns>Those ticked here, and those that could not be.</returns>
+    private static (List<string> Ticked, List<string> Unticked) Tick(List<Seen> seen)
+    {
+        var ticked = new List<string>();
+        var unticked = new List<string>();
+        foreach (var item in seen.Where(Offered))
+        {
+            try
+            {
+                if (!item.Element.TryGetCurrentPattern(TogglePattern.Pattern, out var pattern)) continue;
+                var toggle = (TogglePattern)pattern;
+                if (toggle.Current.ToggleState != ToggleState.Off) continue;
+                toggle.Toggle();
+                Thread.Sleep(150);
+                (toggle.Current.ToggleState == ToggleState.Off ? unticked : ticked).Add(item.Name.Trim());
+            }
+            catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+            {
+                unticked.Add(item.Name.Trim());
+            }
+        }
+        return (ticked, unticked);
+    }
+
+    /// <summary>A dialog, for saying what it showed: its title, what it says, its buttons.</summary>
+    private static string Shown(string title, List<string> texts, IEnumerable<string> buttons)
+    {
+        var said = string.Join(" ", texts);
+        if (said.Length > 300) said = said[..300] + "…";
+        var labels = buttons.Select(Label).ToList();
+        return $"\"{title}\"{(said.Length > 0 ? $" saying \"{said}\"" : "")}, {(labels.Count > 0 ? $"with {string.Join(", ", labels)}" : "with no button")}";
     }
 
     // ---------------------------------------------------------------- starting it
@@ -681,7 +847,7 @@ public static partial class TosiClient
     private static Seen? Locate(IntPtr handle, AutomationElement window, string name, ref AutomationElement? search, Action<string>? say)
     {
         var seen = Look(window);
-        // In view already - searched for before, by this run or the last: nothing to do.
+        // In view already (searched for before, in this run): nothing to do.
         if (Row(seen, name) is { } kept) return kept;
 
         // The client's search first: a list filtered to the Lock stays put, whoever scrolls it.
@@ -916,6 +1082,13 @@ public static partial class TosiClient
             Write(AutomationElement.FromHandle(handle), 0, say);
             shown = handle;
         }
+        // Its dialogs, over its window.
+        if (FindWindow(MainTitle()) is var main && main != IntPtr.Zero)
+            foreach (var dialog in OtherWindows(main).Where(d => !PasswordTitle().IsMatch(Title(d))))
+            {
+                say($"[{Title(dialog)}: a dialog of Tosi Client's{(IsWindowEnabled(main) ? "" : ", its window taking nothing until it is answered")}]");
+                Write(AutomationElement.FromHandle(dialog), 0, say);
+            }
         if (!found) say($"No Tosi Client window on this desktop.{Nearby()}");
         say($"[Adapter: {(Adapter() is { } adapter ? $"{adapter.Name}, {(adapter.Up ? "up" : "down")} {adapter.Addresses}" : "none named for Tosi")}]");
         if (Snap(PicturePath, shown)) say($"[A picture of the screen is in {PicturePath}.]");
@@ -1005,6 +1178,7 @@ public static partial class TosiClient
             }
             Thread.Sleep(500);
         }
+        ClearSearch(handle, window, Tell);
         Tell("Done watching.");
         return 0;
     }
@@ -1050,6 +1224,26 @@ public static partial class TosiClient
 
     [GeneratedRegex(@"^((Dis)?connect|Cancel)$", RegexOptions.IgnoreCase)]
     private static partial Regex ConnectButton();
+
+    /// <summary>
+    /// Tosi Key's "Access rights changed": New access rights (from …) - "You have been granted access
+    /// to the following Gateways" - or Access rights removed (by …) - "Your access to following Gateways
+    /// has been revoked" - or still receiving them. Not its wizards for giving access rights to
+    /// other keys (Edit access rights, Choose access rights, Confirm access rights).
+    /// </summary>
+    [GeneratedRegex(@"\baccess rights (changed|removed)\b|\bnew access rights\b|\bnew serializations\b|\bgranted access to the following\b|\bhas been revoked\b|\breceiving access right changes\b", RegexOptions.IgnoreCase)]
+    private static partial Regex AccessRights();
+
+    /// <summary>Locks given to the key, to be ticked for it to take them.</summary>
+    [GeneratedRegex(@"\bgranted access\b|\bnew access rights\b|\bnew serializations\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Granted();
+
+    [GeneratedRegex(@"\breceiving access right changes\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Receiving();
+
+    /// <summary>A button that turns down what a dialog offers: never pressed for a person.</summary>
+    [GeneratedRegex(@"^(cancel|no|reject|decline|remove|delete|later|abort)$", RegexOptions.IgnoreCase)]
+    private static partial Regex Refusing();
 
     /// <summary>On the way up: connecting, authenticating, assigning an address … or anything else with an ellipsis.</summary>
     [GeneratedRegex(@"\b(re)?connecting\b|\bauthenticat|\bassigning\b|\bnegotiat|\bestablishing\b|\binitiali[sz]|\bhandshak|\bresolving\b|(\.\.\.|…)\s*$", RegexOptions.IgnoreCase)]

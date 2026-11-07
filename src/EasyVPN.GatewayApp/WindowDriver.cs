@@ -246,6 +246,24 @@ internal static class WindowDriver
         return found;
     }
 
+    /// <summary>
+    /// The other windows the program showing <paramref name="window"/> shows, with a title and a size: its
+    /// dialogs, which Windows keeps as windows of their own, over the one that opened them.
+    /// </summary>
+    internal static List<IntPtr> OtherWindows(IntPtr window)
+    {
+        var found = new List<IntPtr>();
+        if (GetWindowThreadProcessId(window, out var process) == 0) return found;
+        EnumWindows((handle, _) =>
+        {
+            if (handle != window && IsWindowVisible(handle) && GetWindowThreadProcessId(handle, out var of) != 0 && of == process
+                && GetWindowTextLength(handle) > 0 && GetWindowRect(handle, out var r) && r.Right > r.Left && r.Bottom > r.Top)
+                found.Add(handle);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     /// <summary>A window's title, for saying which window.</summary>
     internal static string Title(IntPtr handle)
     {
@@ -399,8 +417,15 @@ internal static class WindowDriver
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern int GetWindowText(IntPtr handle, StringBuilder text, int length);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(IntPtr handle);
+
     [DllImport("user32.dll")]
     internal static extern bool IsWindowVisible(IntPtr handle);
+
+    /// <summary>False while a dialog of its program's waits for an answer over it: it takes nothing until then.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool IsWindowEnabled(IntPtr handle);
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr handle);

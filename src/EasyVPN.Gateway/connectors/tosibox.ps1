@@ -2,8 +2,9 @@
     tosibox - Tosi Client (once TOSIBOX Key) on this gateway's desktop. It has no command line, so
     the EasyVPN Gateway app, started in a desktop session on the gateway, does what a person would
     there: starts the client if it is not running (or shows it from the notification area), enters
-    its password if it asks, searches for the Lock, presses its Connect or Disconnect, and waits
-    until the client shows it connected or disconnected.
+    its password if it asks, answers its "Access rights changed" (every Lock offered ticked, then
+    OK), searches for the Lock, presses its Connect or Disconnect, waits until the client shows it
+    connected or disconnected, and empties the search again, so Tosibox Monitor sees every Lock.
 
     Settings:  lock      the Lock's name exactly as Tosi Client lists it, such as Tosibox 15 [Plant]
                          (required)

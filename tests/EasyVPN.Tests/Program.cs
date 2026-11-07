@@ -205,6 +205,24 @@ try
         Equal("Assigning IP address...", TosiClient.Status(["", "10:9a:b9:08:72:2a", "Assigning IP address...", "", ""]));
         Equal("Gateway online and ready to connect", TosiClient.Status(["192.168.1.5", "10-9A-B9-08-72-2A", "Gateway online and ready to connect", "Connect"]));
     });
+    await Check("Tosi Client's Access rights changed is answered, and nothing else", () =>
+    {
+        // Tosi Key 26.9's own words.
+        string[] granted = ["New access rights from Master Key 1", "You have been granted access to the following Gateways.", "Please confirm this action by selecting the Gateways you want to add."];
+        Equal((TosiClient.Answer.Press, "OK"), TosiClient.Answering("Access rights changed", granted, [("OK", true), ("Cancel", true)]));
+        Equal((TosiClient.Answer.Press, "&OK"), TosiClient.Answering("Access rights changed", granted, [("&OK", true)]));
+        Equal((TosiClient.Answer.Wait, (string?)null), TosiClient.Answering("Access rights changed", granted, [("OK", false), ("Cancel", true)]));
+        Equal((TosiClient.Answer.Press, "OK"), TosiClient.Answering("Access rights changed", ["Access rights removed by Master Key 1", "Your access to following Gateways has been revoked."], [("OK", true)]));
+        Equal((TosiClient.Answer.Press, "Close"), TosiClient.Answering("Access rights changed", ["Your access to following Gateways has been revoked."], [("Close", true)]));
+        Equal((TosiClient.Answer.Wait, (string?)null), TosiClient.Answering("Access rights changed", ["Receiving access right changes"], [("Cancel", true)]));
+        Equal((TosiClient.Answer.Wait, (string?)null), TosiClient.Answering("Access rights changed", [], []));
+        Equal((TosiClient.Answer.Leave, (string?)null), TosiClient.Answering("Access rights changed", granted, [("Cancel", true)]));
+        // What a person must decide is never pressed.
+        Equal((TosiClient.Answer.Leave, (string?)null), TosiClient.Answering("Confirm new SoftKey", ["A SoftKey created by this Key has been taken into use and is now waiting for confirmation."], [("Accept", true), ("Reject", true)]));
+        Equal((TosiClient.Answer.Leave, (string?)null), TosiClient.Answering("Edit access rights - Sub Key 2", ["You are about to make the following changes to the access rights. Please confirm."], [("OK", true), ("Cancel", true)]));
+        Equal((TosiClient.Answer.Leave, (string?)null), TosiClient.Answering("Choose access rights", ["Choose access rights for Key 3 now?"], [("OK", true)]));
+        Equal((TosiClient.Answer.Leave, (string?)null), TosiClient.Answering("Remove Mobile Client", ["Are you sure you want to remove selected Mobile Client?"], [("Remove", true), ("Cancel", true)]));
+    });
     await Check("VPN route discovery filters uplinks and broadcasts", () =>
     {
         var before = new[] { Route("0.0.0.0", 0, 1) };

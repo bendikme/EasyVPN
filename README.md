@@ -347,10 +347,15 @@ notification area, the app starts it there - with the program set in *Settings*
 (`TosiboxKey.exe`), or else one it finds where Windows keeps track of programs - after closing any
 copy of it left on another desktop, where nobody could use it and it would keep another from
 starting; then it types its password (from *Settings*, or the facility's own) and waits for the
-list to fill. It finds the Lock in view, or else with the client's search, which filters the list
-to it and so keeps it in view whoever scrolls (or else scrolled to, or typed into the list); the
-search is left showing it. It presses Connect or
-Disconnect (Cancel, for one still connecting), and waits until the client shows it. The gateway
+list to fill. A dialog of the client's over its window, *Access rights changed* - Locks given to
+its key by a Master Key, or taken from it - takes nothing else until it is answered, so the app
+ticks every Lock it offers and presses its OK, and says which; any other dialog it leaves to a
+person, and says so. It finds the Lock in view, or else with the client's search, which filters
+the list to it and so keeps it in view whoever scrolls (or else scrolled to, or typed into the
+list). It presses Connect or
+Disconnect (Cancel, for one still connecting), and waits until the client shows it; then it
+empties the search, so the client lists every Lock again (Tosibox Monitor reads its list as it
+stands), and the next Connect or Disconnect searches again. The gateway
 is the client's only user: before a Lock connects, any other the client has connected is
 disconnected, and after it disconnects, none is left connected. For that the app reads the whole
 list (scrolled through, when the client shows UI Automation only the rows in view), and counts a
